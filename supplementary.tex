@@ -1,0 +1,1623 @@
+%==============================================================================
+% Closing the Variance Gap: Bochner PINN for Lévy-Driven SPDEs
+% Hubert Lipski
+%
+% Version 4: incorporates all experimental findings from the Heston-V
+% diagnosis campaign (subgrid overfit, randomized subgrid fix, cumulant
+% matching for kurtosis, Lévy intensity tau-sweep).
+%
+% Key changes from v3:
+%  - Abstract: Heston-V "structural failure" replaced by diagnosis + fix
+%  - §1.3 Contributions: three new bullets (subgrid overfit, cumulant, Lévy tau)
+%  - §2 Method: new §2.6 randomized spectral sub-grid
+%  - §3.4 Theory Remark: reframed from "structural failure" to "initial diagnosis"
+%  - §5 Results: new §5.5 Heston-V diagnosis with 2×4 ablation table
+%  - §6 Discussion: "Heston variance channel: diagnosed and fixed" replaces
+%   "a documented failure"
+%  - §7 Conclusion: updated
+%  - Appendix A: Lévy intensity threshold sweep (negative result)
+%==============================================================================
+
+\documentclass[review,12pt]{elsarticle}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amsthm, amssymb}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage[disable]{microtype}
+\usepackage{tikz}
+\usetikzlibrary{positioning, arrows.meta, shapes.geometric}
+
+\graphicspath{{figures/}}
+
+\newtheorem{remark}{Remark}
+\newtheorem{proposition}{Proposition}
+\newtheorem{lemma}{Lemma}
+\newtheorem{corollary}{Corollary}
+\newtheorem{conjecture}{Conjecture}
+
+\journal{Journal of Computational Physics}
+
+\begin{document}
+
+\title{Supplementary Material:\\ Closing the Variance Gap: Bochner PINN for Physics-Informed Learning on Stationary Random Fields}
+\author{Hubert Lipski}
+\date{\today}
+\maketitle
+
+\noindent This document collects the proof of
+Proposition~3.1 (rigorous Gaussian single-realisation convergence
+rate under the kernel-smoothed periodogram loss), the supporting
+lemmas, the L\'evy partial-result proofs together with a frank
+discussion of the obstacles to a fully rigorous L\'evy extension,
+the corollaries, the non-separable extension, the NTK conjectural
+training-time bound, the L\'evy intensity threshold sweep
+appendix, and (S4) a full-law convergence result for L\'evy drivers
+in the Zolotarev metric $\zeta_s$ that removes the $4\sqrt J$
+Gaussian-projection floor and covers $\alpha$-stable forcing,
+$s < \alpha$. Numbering restarts at A.
+
+\appendix
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section*{S1 \quad Proof of Proposition~3.1 and its extensions}
+\label{app:convergence-proofs}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This appendix collects the four-step proof of
+Proposition~\ref{thm:main} (main theorem), the supporting
+lemmas (log-to-linear control, expected spectral quadrature error,
+single-realisation spectral consistency under mixing,
+Plancherel--Gelbrich bound, the Mishra--Molinaro adaptation), the
+two corollaries (variance-gap rate, L\'evy/non-separable extensions),
+the discussion of the rate, and the end-to-end training-time bound
+originally drafted as Section~3.3 of the main text. The material is
+moved here verbatim; no logical change.
+
+The proof proceeds in four steps.
+
+\begin{lemma}[Log-to-linear control on bounded spectra]
+\label{lem:log-linear}
+Let \(f, g : \mathcal G_s \to \mathbb R_{>0}\) with
+\(\mu_{\min} \le f, g \le \mu_{\max}\). Then
+\[
+\|f - g\|^2_{L^2(\mathcal G_s)}
+\;\le\; (\ln 10)^2\,\mu_{\max}^2\;
+\|\log_{10} f - \log_{10} g\|^2_{L^2(\mathcal G_s)}.
+\]
+\end{lemma}
+\begin{proof}
+The function \(\varphi(x) = \log_{10} x\) has derivative
+\(\varphi'(x) = (x \ln 10)^{-1}
+\in [(\mu_{\max}\ln 10)^{-1},\, (\mu_{\min}\ln 10)^{-1}]\)
+on \([\mu_{\min}, \mu_{\max}]\). By the mean-value theorem,
+\(|f - g| \le \mu_{\max}\ln 10\;|\log_{10} f - \log_{10} g|\)
+at each grid point. Squaring and summing gives the claim.
+\end{proof}
+
+\begin{remark}[Why we apply Lemma~\ref{lem:log-linear} to the
+kernel-smoothed periodogram, not to the raw periodogram]
+\label{rem:why-smoothed}
+The raw periodogram $\hat S^{\rm xy}_{\mathcal G_s}(u)(k)$ at a
+single Fourier mode is distributed as $\tfrac12 S^{\rm xy}(k)\,\chi^2_2$
+(an exponential with mean $S^{\rm xy}(k)$), so its support is
+$[0,\infty)$ and the upper bound $\mu_{\max}$ of (A3) is exceeded
+with positive probability at every mode. Lemma~\ref{lem:log-linear}
+therefore cannot be applied to the raw periodogram with the
+operator-prescribed $\mu_{\max}$; doing so requires an enlarged
+realisation-dependent constant $\mu_{\max}^{(\hat S)}$ that does not
+match the assumption (A3). The rigorous result avoids this issue
+by applying Lemma~\ref{lem:log-linear} only to the
+\emph{kernel-smoothed} periodogram $\hat S^{\rm xy}_h$
+(Lemma~\ref{lem:single-realisation}); under (A2) and a kernel
+$\kappa$ satisfying the integrability conditions stated there, the
+smoothed periodogram is uniformly bounded by a multiple of
+$\mu_{\max}$ in expectation and, by the variance bound of
+Lemma~\ref{lem:single-realisation}, with high probability up to a
+factor controlled by $(N_s h_N^d)^{-1/2}$ which vanishes at the
+chosen bandwidth $h_N^\star$.
+\end{remark}
+
+Applied to \(f = \widehat S^{\mathrm{xy}}_{h}(u_\theta)\),
+\(g = \widehat S^{\mathrm{xy}}_{h}(u_{\mathrm{FD}})\) at the
+kernel-smoothed bandwidth $h = h_N^\star$, and combined with
+\eqref{eq:tolerance} interpreted on the smoothed loss:
+\begin{equation}
+\bigl\|\widehat S^{\mathrm{xy}}_h(u_\theta)
+- \widehat S^{\mathrm{xy}}_h(u_{\mathrm{FD}})
+\bigr\|^2_{L^2}
++ \bigl\|\widehat S^t_h(u_\theta)
+- \widehat S^t_h(u_{\mathrm{FD}})
+\bigr\|^2_{L^2}
+\;\le\; 2(\ln 10)^2\,\mu_{\max}^2\;\varepsilon.
+\label{eq:log-linear-applied}
+\end{equation}
+
+\begin{lemma}[Expected spectral quadrature error]
+\label{lem:quadrature}
+Under (A2), for every \(u \in L^2_{\mathbb P}\) stationary with
+spatial spectral density
+\(S^{\mathrm{xy}} \in H^{s_x}(\widehat\Omega)\),
+\[
+\bigl\|\mathbb E\bigl[\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u)\bigr]
+- S^{\mathrm{xy}}(u)\bigr\|^2_{L^2(\widehat\Omega)}
+\;\le\; C_{\mathrm{quad},x}\,(N_s^x)^{-2s_x/d},
+\]
+with \(C_{\mathrm{quad},x} = C_x\,\|\mu^{\mathrm{xy}}\|^2_{H^{s_x}}\)
+depending only on \(\mathrm{diam}(\Omega)\) and \(d\). An analogous
+bound holds for the temporal periodogram with rate \((N_s^T)^{-2s_t}\).
+\end{lemma}
+\begin{proof}
+This is the standard \(L^2\) trapezoidal-rule error rate for
+Sobolev functions on a \(d\)-dimensional torus
+(cf.~\cite[Sec.~6.5]{Trefethen2000}) applied to the expected
+periodogram \(\mathbb E[\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u)]\),
+which equals a Dirichlet-kernel smoothing of \(S^{\mathrm{xy}}\) and
+inherits its \(H^{s_x}\) regularity. The constant absorbs the
+\(H^{s_x}\) norm.
+\end{proof}
+
+\begin{remark}[Single-realisation variance and the proof gap]
+\label{rem:periodogram-variance}
+Lemma~\ref{lem:quadrature} bounds the \emph{bias}
+\(\|\mathbb E[\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u)]
+- S^{\mathrm{xy}}(u)\|_{L^2}\) of the periodogram, not its
+pointwise variance. From a single sample path the raw periodogram
+has \(\Theta(1)\) variance per Fourier mode (chi-squared-2
+distribution at each mode, cf.~\cite[Ch.~4]{Brillinger1981}); this
+is the distributional content of Remark~\ref{rem:em-floor}. The
+training loss (A4) therefore involves
+\(\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u_\theta)\), a
+single-realisation quantity, while the bound
+in~\eqref{eq:spectral-l2-bound} uses
+\(\mathbb E[\widehat S^{\mathrm{xy}}_{\mathcal G_s}]\); the gap
+between the two does not shrink as \(N_s \to \infty\) without
+additional smoothing.
+
+Lemma~\ref{lem:single-realisation} below closes this gap: replacing
+the raw periodogram by its kernel-smoothed version
+\(\widehat S^{\mathrm{xy}}_h\) with bandwidth \(h_N \to 0\),
+\(N_s h_N^d \to \infty\), yields a consistent single-realisation
+estimator at the minimax rate \(N_s^{-s_x/(2s_x+d)}\) under (A6).
+In the practical regime of this paper (raw periodogram, single
+realisation) we report against \(\gamma_{10}^2 \approx 0.063\) as
+a single-mode reference scale (Remark~\ref{rem:em-floor}); the
+surviving Gumbel-variance contribution and any residual law-distance
+inflate the empirical \(\varepsilon\) of (A4) to the
+\(5\)--\(7\times\) plateau seen in the experiments.
+\end{remark}
+
+\begin{lemma}[Single-realisation spectral consistency under mixing]
+\label{lem:single-realisation}
+Under (A1)--(A2) and (A6), let
+\[
+\widehat S^{\mathrm{xy}}_h(u)(k)
+:= \int \kappa_{h_N}(k - k')\,
+\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u)(k')\,dk',
+\]
+where \(\kappa_{h_N}(k) = h_N^{-d}\kappa(k/h_N)\) is a symmetric
+probability kernel with
+\(\int |k|^{s_x}\kappa(k)\,dk < \infty\).
+Then for any single realisation of \(u\),
+\begin{equation}
+\label{eq:sr-mse}
+\bigl\|\widehat S^{\mathrm{xy}}_h(u) - S^{\mathrm{xy}}(u)
+\bigr\|^2_{L^2(\widehat\Omega)}
+\;\le\;
+C_{\mathrm{bias}}\,h_N^{2s_x}
+\;+\;
+\frac{C_{\mathrm{var}}}{N_s\,h_N^{d}},
+\end{equation}
+where \(C_{\mathrm{bias}} = C_\kappa\|\mu^{\mathrm{xy}}\|^2_{H^{s_x}}\)
+and \(C_{\mathrm{var}}\) depends on \(C_\alpha\) and \(\gamma\).
+The minimax-optimal bandwidth \(h_N^* = N_s^{-1/(2s_x + d)}\)
+gives the \(L^2\) rate
+\[
+\bigl\|\widehat S^{\mathrm{xy}}_{h^*}(u) - S^{\mathrm{xy}}(u)
+\bigr\|_{L^2}
+\;\le\;(C_{\mathrm{bias}}+C_{\mathrm{var}})^{1/2}\,
+N_s^{-s_x/(2s_x+d)},
+\]
+which converges to zero and matches the minimax lower bound for
+nonparametric spectral density estimation under \(\alpha\)-mixing
+\cite{Dahlhaus1996}.
+\end{lemma}
+\begin{proof}
+\emph{Bias.} Since
+\(\mathbb E[\widehat S^{\mathrm{xy}}_{\mathcal G_s}(u)(k)] =
+S^{\mathrm{xy}}(u)(k) + O(N_s^{-1})\) by
+Lemma~\ref{lem:quadrature}, convolution with \(\kappa_{h_N}\)
+gives
+\(\mathbb E[\widehat S^{\mathrm{xy}}_h(u)(k)] =
+(\kappa_{h_N} * S^{\mathrm{xy}})(k)\).
+For \(S^{\mathrm{xy}} \in H^{s_x}\) and a kernel with vanishing
+moments up to order \(s_x\), standard approximation theory gives
+\(\|(\kappa_{h_N} * S^{\mathrm{xy}}) - S^{\mathrm{xy}}\|_{L^2}
+\le C_\kappa \|\mu^{\mathrm{xy}}\|_{H^{s_x}} h_N^{s_x}\).
+
+\emph{Variance.} Under (A6), Brillinger's cumulant spectral
+bound~\cite[Thm.~4.3.2]{Brillinger1981} gives
+\(|\mathrm{Cov}(\widehat S^{\mathrm{xy}}_{\mathcal G_s}(k_1),
+\widehat S^{\mathrm{xy}}_{\mathcal G_s}(k_2))|
+\le C N_s^{-1} \alpha(|k_1 - k_2|/\Delta k)\),
+where \(\Delta k\) is the frequency resolution.
+Convolving against \(\kappa_{h_N}^{\otimes 2}\) and using
+\(\gamma > d + 1\) to ensure summability gives
+\(\mathrm{Var}[\widehat S^{\mathrm{xy}}_h(u)(k)]
+\le C_{\mathrm{var}}(N_s h_N^d)^{-1}\).
+Integrating over \(k \in \widehat\Omega\) yields the variance term
+in~\eqref{eq:sr-mse}.
+
+\emph{Optimal bandwidth.} Minimising
+\(C_{\mathrm{bias}} h_N^{2s_x} + C_{\mathrm{var}}(N_s h_N^d)^{-1}\)
+over \(h_N\) gives \(h_N^* \propto N_s^{-1/(2s_x+d)}\) and the
+stated rate. The minimax lower bound follows
+from~\cite[Thm.~3.1]{Dahlhaus1996} applied to the stationary case.
+\end{proof}
+
+Combining Lemma~\ref{lem:log-linear} (applied to the smoothed
+periodogram, per Remark~\ref{rem:why-smoothed}) with
+Lemma~\ref{lem:single-realisation} (single-realisation consistency
+of $\hat S^{\rm xy}_h$ at the minimax-optimal bandwidth
+$h^\star = N_s^{-1/(2s_x+d)}$) via the triangle inequality, and
+using $\|a+b\|^2 \le 2\|a\|^2 + 2\|b\|^2$:
+\begin{equation}
+\|S^{\mathrm{xy}}(u_\theta) - S^{\mathrm{xy}}(u_{\mathrm{FD}})
+\|^2_{L^2(\widehat\Omega)}
+\;\le\; 2(\ln 10)^2\,\mu_{\max}^2\;\varepsilon
+\;+\; 4\,(C_{\mathrm{bias}}+C_{\mathrm{var}})\,
+N_s^{-2 s_x / (2 s_x + d)},
+\label{eq:spectral-l2-bound}
+\end{equation}
+which is the rigorous single-realisation bound; the $N_s^{-2s_x/(2s_x+d)}$
+exponent gives $\beta_{\rm sr} = s_x/(2(2s_x+d))$ in
+Proposition~\ref{thm:main}. An analogous bound holds for the
+temporal direction.
+
+\begin{remark}[Bias-only rate]
+\label{rem:bias-only-rate}
+If the realisation variance of the periodogram is ignored
+(equivalently, the chain replaces
+Lemma~\ref{lem:single-realisation} by Lemma~\ref{lem:quadrature}'s
+bias bound), one obtains the faster bias-only rate
+$2(\ln 10)^2 \mu_{\max}^2 \varepsilon + 2 C_{\rm quad,x}(N_s^x)^{-2 s_x/d}$
+matching $\beta_{\rm bias} = \tfrac12\min(s_x/d,\,s_t)$ (which
+collapses to $s_x/(2d)$ when $s_t \ge s_x/d$, the regime of this
+paper). This rate corresponds to
+training against an ensemble-averaged spectral target rather than a
+single realisation, and is the rate observed empirically in
+Section~\ref{subsec:grid-conv} of the main text where the target is
+ensemble-averaged. The rigorous single-realisation rate
+$\beta_{\rm sr} = 1/8$ is slower but applies to any individual
+training run; the bias-only rate $\beta_{\rm bias} = 1/4$ is faster
+but is a heuristic statement about the bias of the spectral target,
+not about training-error convergence per realisation.
+\end{remark}
+
+\begin{lemma}[Plancherel--Gelbrich bound]
+\label{lem:gelbrich}
+Let \(u_1, u_2\) be centred Gaussian random fields on
+\(\Omega \times [0,T]\) satisfying (A1)--(A3). Then
+\[
+W_2^2\bigl(\mathcal L(u_1),\,\mathcal L(u_2)\bigr)
+\;\le\; \frac{1}{4\mu_{\min}}\;
+\|\mu_1 - \mu_2\|^2_{L^2(\widehat\Omega \times [0,T])}.
+\]
+\end{lemma}
+\begin{proof}
+For centred Gaussian measures on a separable Hilbert space with
+covariance operators \(C_1, C_2\), the Gelbrich--Givens--Shortt
+formula~\cite{Gelbrich1990,GivensShortt1984} gives
+\(W_2^2 = \mathrm{tr}\bigl(C_1 + C_2
+- 2(C_1^{1/2} C_2 C_1^{1/2})^{1/2}\bigr)\).
+By (A1), both fields are stationary on the periodised domain;
+hence \(C_1, C_2\) are simultaneously diagonalised by the Fourier
+basis with eigenvalues \(\mu_1(k,\omega), \mu_2(k,\omega)\). The
+formula reduces to
+\(W_2^2 = \sum_{(k,\omega)}
+(\sqrt{\mu_1(k,\omega)} - \sqrt{\mu_2(k,\omega)})^2\).
+From the identity
+\((\sqrt a - \sqrt b)^2 = (a-b)^2/(\sqrt a + \sqrt b)^2\)
+and \((\sqrt a + \sqrt b)^2 \ge 4\min(a,b)\), together with (A3):
+\(W_2^2 \le \frac{1}{4\mu_{\min}}
+\sum_{(k,\omega)} (\mu_1(k,\omega) - \mu_2(k,\omega))^2\).
+Under separability, the tensor-product decomposition
+\(\mu_1 - \mu_2 = (\mu_1^{\mathrm{xy}} - \mu_2^{\mathrm{xy}})
+\otimes \mu_1^t + \mu_2^{\mathrm{xy}} \otimes
+(\mu_1^t - \mu_2^t)\) and \(\|a+b\|^2 \le 2\|a\|^2 + 2\|b\|^2\)
+give the factored form used in the proof of
+Proposition~\ref{thm:main}.
+\end{proof}
+
+\begin{lemma}[Mishra--Molinaro, adapted]
+\label{lem:mm}
+Assume the SPDE residual operator \(\mathcal R\) is well posed in the
+sense of \cite[Thm.~3.4]{MishraMolinaro2022}, with stability constant
+\(C_{\mathrm{stab}}\). Then under \eqref{eq:tolerance},
+\[
+\mathbb E\,\|u_\theta - u_{\mathrm{FD}}\|^2_{L^2(\Omega \times [0,T])}
+\;\le\; C_{\mathrm{MM}}\,\delta,
+\quad
+C_{\mathrm{MM}} = C_{\mathrm{stab}}
+\bigl(1 + \lambda_{\mathrm{ic}}^{-1}
++ \lambda_{\mathrm{bc}}^{-1}\bigr).
+\]
+\end{lemma}
+\begin{proof}
+The driver fields \(\xi, J_{\mathrm{VG}}\) are identical between
+\(u_\theta\) and \(u_{\mathrm{FD}}\) (spline-interpolated from the
+same FD sample path), so the residual operator reduces to a
+deterministic PDE error analysis in the realisation
+\(\omega \in \mathcal P\). Apply~\cite[Thm.~3.4]{MishraMolinaro2022}
+pathwise and take expectations. Since
+\(W_2^2(\mathcal L(u_1), \mathcal L(u_2))
+\le \mathbb E\,\|u_1 - u_2\|^2\) for the trivial coupling, this
+contributes \(\sqrt{C_{\mathrm{MM}}\,\delta}\) to the \(W_2\) bound.
+
+\emph{Remark on the spline-smoothing error.} The spline
+interpolation replaces jump discontinuities in
+\(\xi, J_{\mathrm{VG}}\) with smooth approximants, introducing a
+smoothing error not explicitly bounded in \(C_{\mathrm{MM}}\). For
+Brownian forcing the interpolation error vanishes as $N_s \to
+\infty$ at the standard $O(N_s^{-1/2})$ rate and is absorbed into
+$\delta$ without loss. For Variance-Gamma forcing
+(unbounded-variation paths) the jump-component interpolation error
+is $\Theta(1)$ as $N_s \to \infty$: the spline misses the jumps
+regardless of grid refinement. The bound
+$\mathbb E\|u_\theta - u_{\mathrm{FD}}\|^2 \le C_{\rm MM}\delta$
+therefore degrades to
+$\le C_{\rm MM}\delta + \mathrm{(jump\;floor)}$ for VG, where the
+jump floor is not controlled by training. This is the principal
+analytical obstacle to a fully rigorous L\'evy extension and
+motivates the partial-result framing of
+Section~\ref{subsec:levy-ext} in the main text. The rigorous main
+theorem (Proposition~\ref{thm:main}) assumes (A5) Gaussianity, so
+this remark applies only to the L\'evy extensions
+(Propositions~\ref{thm:levy-ext}, \ref{prop:levy-ito}).
+\end{proof}
+
+\begin{proof}[Proof of Proposition~\ref{thm:main}]
+The bound is obtained as the looser of two independent upper bounds
+on \(W_2(\mathcal L(u_\theta),\mathcal L(u_{\mathrm{FD}}))\), combined
+via \(\min(a,b)\le a+b\).
+
+\smallskip
+\emph{Spectral path (uses (A5)).} Apply the triangle inequality on
+\(W_2\) through the intermediate centred Gaussian measure
+\(\mathcal N(0,\,\mathcal C_{u_{\mathrm{FD}}})\) with covariance
+operator \(\mathcal C_{u_{\mathrm{FD}}}\) equal to that of
+\(u_{\mathrm{FD}}\):
+\[
+W_2\bigl(\mathcal L(u_\theta),\,\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\;
+W_2\bigl(\mathcal L(u_\theta),\,
+\mathcal N(0,\,\mathcal C_{u_{\mathrm{FD}}})\bigr)
+\,+\,
+W_2\bigl(\mathcal N(0,\,\mathcal C_{u_{\mathrm{FD}}}),\,
+\mathcal L(u_{\mathrm{FD}})\bigr).
+\]
+Under (A5) both fields are centred Gaussian, so
+\(\mathcal L(u_{\mathrm{FD}}) = \mathcal N(0,\,\mathcal C_{u_{\mathrm{FD}}})\)
+and the second term vanishes;
+\(\mathcal L(u_\theta) = \mathcal N(0,\,\mathcal C_{u_\theta})\) and
+Lemma~\ref{lem:gelbrich} bounds the first term by
+\(\tfrac{1}{2\sqrt{\mu_{\min}}}\,\|\mu_{u_\theta}
+- \mu_{u_{\mathrm{FD}}}\|_{L^2}\). Using the separable factoring
+\(\mu_1 - \mu_2 = (\mu^{\mathrm{xy}}_1 - \mu^{\mathrm{xy}}_2)
+\otimes \mu^t_1
++ \mu^{\mathrm{xy}}_2 \otimes (\mu^t_1 - \mu^t_2)\) with
+\(\|a+b\|^2 \le 2\|a\|^2 + 2\|b\|^2\), and bounding the trained
+model's marginal norm $\|\mu^t_1\|_{L^2} \le M_t + \|\mu^t_1 -
+\mu^t_2\|_{L^2}$ (triangle), the second summand is itself at most
+$2(\ln 10)\mu_{\max}\sqrt\varepsilon$ by
+Lemma~\ref{lem:log-linear}, which is a lower-order contribution
+absorbed into the $\sqrt\varepsilon$ term; treating it as such, we
+may use $M_t$ uniformly in the factoring. Substituting
+\eqref{eq:spectral-l2-bound} for each spectral $L^2$ difference at
+$h^\star$:
+\[
+W_2 \;\le\;
+\frac{1}{\sqrt{2\mu_{\min}}}\Bigl[
+2(\ln 10)\,\mu_{\max}\sqrt\varepsilon\,(M_t + M_{xy})
++ 2\sqrt{(C_{\rm bias}+C_{\rm var})}\,N_s^{-s_x/(2 s_x + d)}\,M_t
++ 2\sqrt{(C_{\rm bias,t}+C_{\rm var,t})}\,N_s^{-s_t/(2 s_t + 1)}\,M_{xy}
+\Bigr],
+\]
+where \(M_t := \|\mu^t_{\mathrm{FD}}\|_{L^2}\),
+\(M_{xy} := \|\mu^{\mathrm{xy}}_{\mathrm{FD}}\|_{L^2}\), and the
+spatial and temporal bandwidths $h^\star_x = N_s^{-1/(2s_x+d)}$,
+$h^\star_t = N_s^{-1/(2s_t+1)}$ are set to their respective
+minimax-optimal values. Absorbing constants and using
+\(N_s^{-\beta_{\rm sr}} \ge N_s^{-s_x/(2 s_x + d)}
++ N_s^{-s_t/(2 s_t + 1)}\) up to a constant
+(definition of $\beta_{\rm sr} = s_x/(2(2s_x+d))$ at $s_t \ge s_x$),
+\[
+W_2\bigl(\mathcal L(u_\theta),\,\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; C_1\sqrt\varepsilon \,+\, C_2\,N_s^{-\beta_{\rm sr}}.
+\tag{$\star$}\label{eq:spectral-path}
+\]
+
+\smallskip
+\emph{Pathwise path (does not use (A5)).} Lemma~\ref{lem:mm} applied
+with the trivial coupling gives
+\[
+W_2^2\bigl(\mathcal L(u_\theta),\,\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; \mathbb E\,\|u_\theta - u_{\mathrm{FD}}\|^2
+\;\le\; C_{\mathrm{MM}}\,\delta,
+\quad\text{hence}\quad
+W_2 \;\le\; C_3\sqrt\delta,
+\tag{$\dagger$}\label{eq:pde-path}
+\]
+with no Gaussianity assumption.
+
+\smallskip
+\emph{Combined bound.} Since \(\min(a,b) \le a + b\) for
+\(a,b\ge 0\), \eqref{eq:spectral-path} and \eqref{eq:pde-path} together
+yield
+\[
+W_2\bigl(\mathcal L(u_\theta),\,\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; C_1\sqrt\varepsilon \,+\, C_2\,N_s^{-\beta_{\rm sr}}
+\,+\, C_3\sqrt\delta,
+\]
+which is \eqref{eq:main-bound}. The sum form is loose; in either
+asymptotic regime (spectrally-rich training with vanishing
+\(\varepsilon\), or PDE-tight training with vanishing \(\delta\))
+the corresponding single-path bound is the operative one. The
+spectral path requires (A5); the PDE path does not. In particular,
+dropping the spectral loss from training (so the bound on
+\(\varepsilon\) becomes vacuous) reduces the result to
+\eqref{eq:pde-path}, the Mishra--Molinaro estimate of
+\cite{MishraMolinaro2022}.
+\end{proof}
+
+\subsubsection{Corollaries}
+
+\begin{proposition}[Variance-gap rate]
+\label{cor:vr}
+Under (A1)--(A4),
+\[
+\bigl|\mathrm{Var}(u_\theta)/\mathrm{Var}(u_{\mathrm{FD}}) - 1\bigr|
+\;\le\;
+\frac{2\sqrt{2}}{\sqrt{\mathrm{Var}(u_{\mathrm{FD}})}}
+\bigl(\sqrt{\mathrm{Var}(u_\theta)}
++ \sqrt{\mathrm{Var}(u_{\mathrm{FD}})}\bigr)
+\bigl(C_1\sqrt\varepsilon + C_2 N_s^{-\beta_{\rm sr}}
++ C_3\sqrt\delta\bigr).
+\]
+\end{proposition}
+\begin{proof}
+For centred fields, \(|\mathrm{Var}(u_1) - \mathrm{Var}(u_2)|
+= |\mathbb E[\|u_1\|^2] - \mathbb E[\|u_2\|^2]|\).
+Under the optimal coupling \((X, Y)\) with \(X \sim \mathcal L(u_\theta)\),
+\(Y \sim \mathcal L(u_{\mathrm{FD}})\):
+\[
+|\mathbb E[\|X\|^2] - \mathbb E[\|Y\|^2]|
+\le \mathbb E\bigl[({\|X\|+\|Y\|})\,\|X-Y\|\bigr]
+\le \sqrt{2(\mathrm{Var}(u_\theta)+\mathrm{Var}(u_{\mathrm{FD}}))}
+\cdot W_2
+\le \sqrt{2}\,(\sqrt{\mathrm{Var}(u_\theta)}
++\sqrt{\mathrm{Var}(u_{\mathrm{FD}})})\cdot W_2,
+\]
+using Cauchy--Schwarz and \((a+b)^2\le 2(a^2+b^2)\).
+Divide by \(\mathrm{Var}(u_{\mathrm{FD}})\) and substitute
+\eqref{eq:main-bound}.
+\end{proof}
+
+\begin{remark}[Reference scale \(\gamma_{10}^2\) for the
+raw-periodogram loss]
+\label{rem:em-floor}
+The raw log-periodogram is asymptotically Gumbel with mean
+\(\log\mu(k) - \gamma\) and per-mode variance
+\(\pi^2/6\)~\cite[Ch.~5]{Brillinger1981}. In our \(\log_{10}\)
+formulation the shift is \(\gamma_{10} := \gamma/\ln 10 \approx 0.251\);
+it is identical for predictor and reference and therefore cancels
+exactly in the prediction--reference difference, contributing
+nothing to \(\varepsilon\) in (A4) in expectation. The non-vanishing
+residual is the per-mode Gumbel variance
+\(\pi^2/(6\ln^2\!10) \approx 0.310\), damped by axis-averaging in
+\(\widehat S_{xy}, \widehat S_t\) but non-zero at any fixed \(N_s\).
+We report empirical losses against the single-mode reference scale
+\(\gamma_{10}^2 \approx 0.063\) --- the squared mean bias of one
+log-periodogram against the true PSD --- and observe per-channel
+log-PSD MSE plateauing near \(0.3\)--\(0.4\) (a \(5\)--\(7\times\)
+multiplier on \(\gamma_{10}^2\)), the multiplier absorbing both the
+surviving variance contribution and the residual law-distance. The
+corresponding reference \(W_2\) contribution is \(C_1\gamma_{10}\).
+The kernel-smoothed estimator of
+Lemma~\ref{lem:single-realisation} drives the variance residual to
+zero at rate \(N_s^{-2s_x/(2s_x+d)}\), so no \(\gamma_{10}\)
+benchmark is needed in the smoothed proof framework.
+\end{remark}
+
+\subsubsection{Extension to L\'evy-driven fields}
+
+\begin{proposition}[Second-order convergence for stationary L\'evy fields]
+\label{thm:levy-ext}
+Under (A1)--(A4) but with \(u_\theta, u_{\mathrm{FD}}\) not
+necessarily Gaussian, denote by \(\Pi_2\mathcal L(u)\) the Gaussian
+projection (the centred Gaussian measure with the same covariance).
+Then
+\[
+W_2\bigl(\Pi_2\mathcal L(u_\theta),\,
+\Pi_2\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; C_1\sqrt\varepsilon + C_2 N_s^{-\beta_{\rm sr}} + C_3\sqrt\delta.
+\]
+\end{proposition}
+\begin{proof}
+Identical to the proof of Proposition~\ref{thm:main}, replacing
+\(\mathcal L(u)\) by \(\Pi_2\mathcal L(u)\) throughout. The spectral
+measure \(\mu_u\) depends only on the covariance, hence is invariant
+under the projection.
+\end{proof}
+
+The gap between \(\mathcal L(u)\) and \(\Pi_2\mathcal L(u)\) is
+determined by the cumulants \(\kappa_k(u)\) for \(k \ge 3\). For
+Variance-Gamma drivers \(\kappa_3, \kappa_4\) are non-zero, so
+Proposition~\ref{thm:levy-ext} does \emph{not} imply convergence in
+\(W_2\) on the full law. Two routes close this gap:
+\begin{enumerate}
+\item a cumulant-matching loss
+$\mathcal{L}_{\kappa_4}(u_\theta):=(\kappa_4(u_\theta)-\kappa_4(u_{\mathrm{FD}}))^2$
+(Section~\ref{subsec:cumulant-loss}), which empirically raises the
+predicted kurtosis from $4.2$ to $25.1$; or
+\item an $L^2$ bound on the pure-jump component $u^J$ via the
+L\'evy--It\^o decomposition (Proposition~\ref{prop:levy-ito} below),
+giving an explicit $O(\sqrt\nu)$ correction to~\eqref{thm:levy-ext}.
+\end{enumerate}
+
+\begin{proposition}[Full-law convergence via L\'evy--It\^o coupling]
+\label{prop:levy-ito}
+Under (A1)--(A4) and (A7),
+\begin{equation}
+\label{eq:levy-ito-bound}
+W_2\!\left(\mathcal{L}(u_\theta),\,\mathcal{L}(u_{\mathrm{FD}})\right)
+\;\le\;C_1\sqrt{\varepsilon}+C_2 N_s^{-\beta_{\rm sr}}+C_3\sqrt{\delta}
++4\sqrt{J}.
+\end{equation}
+In the Gaussian limit $J\to 0$ (equivalently $\nu\to 0$ for VG
+drivers), this reduces to Proposition~\ref{thm:main}.
+\end{proposition}
+
+\begin{proof}
+Apply the $W_2$ triangle inequality:
+\begin{align}
+\label{eq:levy-ito-triangle}
+W_2(\mathcal{L}(u_\theta),\mathcal{L}(u_{\mathrm{FD}}))
+&\le
+W_2\!\left(\mathcal{L}(u_\theta),\Pi_2\mathcal{L}(u_\theta)\right)
++W_2\!\left(\Pi_2\mathcal{L}(u_\theta),\Pi_2\mathcal{L}(u_{\mathrm{FD}})\right) \notag\\
+&\quad+W_2\!\left(\Pi_2\mathcal{L}(u_{\mathrm{FD}}),\mathcal{L}(u_{\mathrm{FD}})\right).
+\end{align}
+The middle term is bounded by
+$C_1\sqrt\varepsilon+C_2 N_s^{-\beta_{\rm sr}}+C_3\sqrt\delta$
+by Proposition~\ref{thm:levy-ext}.
+Write $u=u^G+u^J$ as in (A7), with
+$u^G\sim\mathcal{N}(0,C_{u^G})$ and
+$\Pi_2\mathcal{L}(u)=\mathcal{N}(0,C_u)=\mathcal{N}(0,C_{u^G}+C_{u^J})$.
+Couple $(\mathcal{L}(u),\mathcal{N}(0,C_u))$ by
+$X:=u^G+u^J$ and $Y:=u^G+G_2$
+where $G_2\sim\mathcal{N}(0,C_{u^J})$ is independent of $u$.
+Then $Y\sim\mathcal{N}(0,C_u)$ and
+\[
+\mathbb{E}\|X-Y\|^2_{L^2}
+=\mathbb{E}\|u^J-G_2\|^2_{L^2}
+\le 2\mathbb{E}\|u^J\|^2_{L^2}+2\,\mathrm{tr}(C_{u^J})
+= 4\mathbb{E}\|u^J\|^2_{L^2}\le 4J,
+\]
+giving $W_2(\mathcal{L}(u),\Pi_2\mathcal{L}(u))\le 2\sqrt{J}$ for
+each of $u_\theta$ and $u_{\mathrm{FD}}$.
+Inserting into~\eqref{eq:levy-ito-triangle} yields~\eqref{eq:levy-ito-bound}.
+$\hfill\square$
+\end{proof}
+
+\begin{remark}[VG quantification of $J$]
+\label{rem:vg-J}
+For the Variance-Gamma driver with parameters $(\sigma,\nu,\theta)$,
+the pure-jump component satisfies
+$\mathbb{E}\|\xi_{\mathrm{VG}}^J\|^2_{L^2([0,T])}=\nu(\sigma^2+\nu\theta^2)T(1+O(\nu))$.
+The SPDE solution inherits this via the Green's function, giving
+$J=O(\nu)$ and a correction $4\sqrt{J}=O(\sqrt\nu)$ in
+\eqref{eq:levy-ito-bound} that vanishes in the Gaussian limit.
+The relationship $\kappa_4=3\nu$ links the correction directly to the
+fourth cumulant: $4\sqrt{J}=O(\kappa_4^{1/2}/3^{1/2})$.
+\end{remark}
+
+\begin{proposition}[Berry--Esseen tightness of spectral matching]
+\label{cor:berry-esseen}
+Under (A1)--(A4) and (A8) with $m=3$,
+\begin{equation}
+\label{eq:be-bound}
+W_1\!\left(\mathcal{L}(u(x,t)),\;\mathcal{N}(0,\sigma_u^2(x,t))\right)
+\;\le\;
+C_{\mathrm{BE}}\,\frac{|\kappa_3(u(x,t))|}{\sigma_u^2(x,t)},
+\end{equation}
+where $C_{\mathrm{BE}}$ is a universal constant from Stein's
+method~\cite{ChenGoldsteinShao2011}. For Variance-Gamma drivers with
+parameters $(\sigma_{\mathrm{vg}},\nu,\theta)$, the exact third cumulant
+per unit volume is $\kappa_3(\xi)=\nu\theta(3\sigma_{\mathrm{vg}}^2+2\nu\theta^2)$,
+giving
+\begin{equation}
+\label{eq:kappa3-vg}
+|\kappa_3(u(x,t))|\;\le\;
+C_G^3\,\nu\,|\theta|\,(3\sigma_{\mathrm{vg}}^2+2\nu\theta^2),\quad
+C_G:=\|G_{\mathrm{SPDE}}(x-\cdot,t-\cdot)\|_{L^3},
+\end{equation}
+and hence, for $2\nu\theta^2\ll 3\sigma_{\mathrm{vg}}^2$,
+\begin{equation}
+\label{eq:be-vg}
+W_1\!\left(\mathcal{L}(u(x,t)),\;\mathcal{N}(0,\sigma_u^2)\right)
+\;\lesssim\;
+\frac{3\,C_{\mathrm{BE}}\,C_G^3\,\nu\,\sigma_{\mathrm{vg}}^2\,|\theta|}{\sigma_u^2}.
+\end{equation}
+\paragraph{Tightness condition.} Spectral matching controls $\sigma_u$
+(second moment); the residual non-Gaussianity is at most
+$\varepsilon_{\mathrm{gap}}$ in $W_1$ whenever
+$|\theta|\le\theta_{\mathrm{cut}}:=
+\varepsilon_{\mathrm{gap}}\,\sigma_u^2\,/\,
+(3\,C_{\mathrm{BE}}\,C_G^3\,\nu\,\sigma_{\mathrm{vg}}^2)$.
+\end{proposition}
+
+\begin{proof}
+\eqref{eq:be-bound} is the Stein's-method bound
+$W_1(\mathcal{L}(X),\mathcal{N}(0,\sigma^2))\le C_S\,E|X|^3/\sigma^2$
+for a centred $X$~\cite[Thm.~3.1]{ChenGoldsteinShao2011},
+combined with $|\kappa_3|=|E[X^3]|\le E|X|^3$.
+For~\eqref{eq:kappa3-vg}: by stochastic Fubini,
+$\kappa_3(u)=\int G^3\kappa_3(\xi)\,dy\,ds$
+(multilinearity of cumulants under independence of Lévy increments).
+Expanding $\ln\phi(u)=-(1/\nu)\ln(1-u\theta\nu-u^2\sigma_{\mathrm{vg}}^2\nu/2)$
+to third order gives $\kappa_3(\xi)=\nu\theta(3\sigma_{\mathrm{vg}}^2+2\nu\theta^2)$~\cite{ContTankov2003,MadanCarrChang1998}.
+H\"older's inequality then gives~\eqref{eq:kappa3-vg}; the dominant small-$|\theta|$
+term yields~\eqref{eq:be-vg}.
+$\hfill\square$
+\end{proof}
+
+\begin{remark}[Numerical tightness]
+\label{rem:be-numerical}
+At $\sigma_{\mathrm{vg}}=0.2$, $\nu=0.5$, $\sigma_u\approx 0.3$,
+$C_{\mathrm{BE}}\approx 1$, $C_G=O(1)$:
+$\theta_{\mathrm{cut}}(0.05)
+\approx 0.09/(0.06\,C_G^3)
+\approx 0.075/C_G^3$.
+Near-symmetric VG with $|\theta|\lesssim 0.07$ gives $5\%$ tightness.
+The paper's $\theta=-0.1$ produces a $W_1$ residual $\approx 0.07/C_G^3$;
+the kurtosis gap beyond this is targeted by the cumulant-matching loss
+of Section~\ref{subsec:cumulant-loss}.
+\end{remark}
+
+\begin{remark}[Single-realisation rate vs bias-only rate]
+\label{cor:smoothed-loss}
+Proposition~\ref{thm:main}'s single-realisation rate
+$\beta_{\rm sr} = s_x/(2(2 s_x + d))$ is obtained by combining
+Lemma~\ref{lem:single-realisation} (smoothed-periodogram
+consistency) with the spectral $L^2$ chain
+\eqref{eq:spectral-l2-bound}. The faster bias-only rate
+$\beta_{\rm bias} = \tfrac12\min(s_x/d,\,s_t)$ from
+Remark~\ref{rem:bias-only-rate}
+corresponds to replacing Lemma~\ref{lem:single-realisation} by
+Lemma~\ref{lem:quadrature}'s expected-periodogram bound, which is
+appropriate when the spectral target is averaged across
+realisations. For $s_x = s_t = 1, d = 2$: $\beta_{\rm sr} = 1/8$
+vs $\beta_{\rm bias} = 1/4$. The slower exponent is the price of
+single-realisation validity. The full proof of
+Proposition~\ref{thm:main} uses the single-realisation rate
+throughout; the bias-only rate is kept only as connection with the
+empirical grid-convergence study.
+\end{remark}
+
+\begin{proof}[Sketch of the relation between the two rates]
+Replace Lemma~\ref{lem:quadrature} in the proof of
+Proposition~\ref{thm:main} with Lemma~\ref{lem:single-realisation}
+at \(h_N = h_N^*\). The \(L^2\) spectral error for a single
+realisation is
+\((C_{\mathrm{bias}}+C_{\mathrm{var}})^{1/2} N_s^{-s_x/(2s_x+d)}\).
+Inserting into the Gelbrich step (Lemma~\ref{lem:gelbrich}), which
+bounds \(W_2 \le \tfrac{1}{2\sqrt{\mu_{\min}}}
+\|\mu_1 - \mu_2\|_{L^2}\), gives the factor
+\(N_s^{-s_x/(2(2s_x+d))} = N_s^{-\beta_{\mathrm{sr}}}\).
+\end{proof}
+
+\subsubsection{Extension to non-separable covariance}
+\label{subsec:nonsep-extension}
+
+The separability assumption (A1) is load-bearing for two steps of the
+proof: the tensor-product factoring of \(\mu_1 - \mu_2\) in
+Lemma~\ref{lem:gelbrich}, and the design of the spectral loss, which
+matches \(\mu^{\mathrm{xy}}\) and \(\mu^t\) separately rather than
+the joint measure \(\mu(\omega, k)\). Both restrictions can be lifted
+by working with the \emph{joint} \((d+1)\)-dimensional spectral
+density, at the cost of a weaker quadrature rate.
+
+\paragraph{Relaxed separability assumption.}
+Replace (A1) by:
+\begin{description}
+\item[(A1$'$) Stationarity without separability.]
+Both \(u_\theta\) and \(u_{\mathrm{FD}}\) are centred, weakly
+stationary with absolutely continuous joint spectral density
+\(S^{\mathrm{joint}}(\omega, k) \in H^s(\mathbb R^{d+1})\),
+\(s = \min(s_x, s_t) > (d+1)/2\). No tensor-product factorisation
+is assumed.
+\end{description}
+
+The joint spectral loss replaces
+\(\mathcal L_{\mathrm{xy}} + \mathcal L_t\) in (A4) by
+\begin{equation}
+\label{eq:joint-tolerance}
+\mathcal L_{\mathrm{joint}}(u_\theta) \le \varepsilon', \quad
+\mathcal L_{\mathrm{joint}}(u) =
+\overline{\Bigl(
+\log_{10}\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u)
+- \log_{10}\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u_{\mathrm{FD}})
+\Bigr)^2},
+\tag{A4$'$}
+\end{equation}
+where
+\(\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u)(\omega, k) =
+|\mathcal G_s|^{-1}
+|\mathcal F_{x,t}[u\!\upharpoonright_{\mathcal G_s}](\omega,k)|^2\)
+is the \((d+1)\)-dimensional periodogram on \(\mathcal G_s\).
+
+\begin{lemma}[Joint spectral quadrature error]
+\label{lem:joint-quadrature}
+Under (A1$'$), for every stationary \(u\) with
+\(S^{\mathrm{joint}} \in H^s(\mathbb R^{d+1})\), \(s > (d+1)/2\),
+\[
+\bigl\|\mathbb E\bigl[\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u)\bigr]
+- S^{\mathrm{joint}}(u)\bigr\|^2_{L^2(\mathbb R^{d+1})}
+\;\le\; C_{\mathrm{quad}}\,(N_s^{\mathrm{tot}})^{-2s/(d+1)},
+\]
+where \(N_s^{\mathrm{tot}} = N_s^x N_s^T\) is the total node count
+and \(C_{\mathrm{quad}} = C\,\|S^{\mathrm{joint}}\|^2_{H^s}\) with
+\(C\) depending only on \(\mathrm{diam}(\Omega)\), \(T\), and \(d\).
+\end{lemma}
+\begin{proof}
+The expected \((d+1)\)-dimensional periodogram is a Dirichlet-kernel
+smoothing of \(S^{\mathrm{joint}}\) in \(\mathbb R^{d+1}\), inheriting
+its \(H^s\) regularity. The \(L^2\) trapezoidal-rule error rate for
+\(H^s\) functions on a \((d+1)\)-dimensional torus
+(cf.~\cite{Brillinger1981,Trefethen2000}) with spacing
+\(h = (N_s^{\mathrm{tot}})^{-1/(d+1)}\) gives bias
+\(O(h^s) = O((N_s^{\mathrm{tot}})^{-s/(d+1)})\) in \(L^2\); squaring
+yields the stated bound.
+\end{proof}
+
+\begin{proposition}[Convergence rate under non-separable covariance]
+\label{thm:nonsep}
+Under (A1$'$), (A3), (A4$'$), (A5) with \(s = \min(s_x, s_t)\),
+\begin{equation}
+\label{eq:nonsep-bound}
+W_2\bigl(\mathcal L(u_\theta),\,\mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; C_1'\sqrt{\varepsilon'}
+\;+\; C_2'\,(N_s^{\mathrm{tot}})^{-\beta'}
+\;+\; C_3\sqrt{\delta},
+\end{equation}
+where
+\[
+\beta' = \frac{s}{2(d+1)},
+\]
+and \(C_1' = \mu_{\max}\,\ln 10 / \sqrt{2\,\mu_{\min}}\),
+\(C_2' = \sqrt{C_{\mathrm{quad}}/\mu_{\min}}\),
+\(C_3 = \sqrt{C_{\mathrm{MM}}}\).
+Compared to the separable Proposition~\ref{thm:main} the joint-density
+constants have no tensor-product factors \(M_{xy},M_t\); the
+\(\sqrt{2}\) in the denominator is from the
+\((\sqrt{a}+\sqrt{b})^2 \ge 4\min(a,b)\) step in
+Lemma~\ref{lem:gelbrich}.
+\end{proposition}
+\begin{proof}
+\emph{Spectral path (uses (A5)).} Apply the triangle inequality
+through \(\mathcal N(0, \mathcal C_{u_{\mathrm{FD}}})\) as in
+Proposition~\ref{thm:main}; under (A5) the second term vanishes.
+Lemma~\ref{lem:gelbrich} gives
+\(W_2 \le \tfrac{1}{2\sqrt{\mu_{\min}}}
+\|\mu_{u_\theta} - \mu_{u_{\mathrm{FD}}}\|_{L^2(\mathbb R^{d+1})}\).
+Since (A1$'$) does not assume separability there is no
+tensor-product factoring; apply the triangle inequality directly:
+\begin{align*}
+\|\mu_1 - \mu_2\|^2_{L^2}
+\;\le\;&
+2\,\bigl\|\mu_1 -
+\mathbb E[\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u_\theta)]\bigr\|^2_{L^2}
++ 2\,\bigl\|\mu_2 -
+\mathbb E[\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u_{\mathrm{FD}})]\bigr\|^2_{L^2}
+\\
+&+ 2\,\bigl\|\widehat S^{\mathrm{joint}}_{\mathcal G_s}(u_\theta)
+- \widehat S^{\mathrm{joint}}_{\mathcal G_s}(u_{\mathrm{FD}})\bigr\|^2_{L^2}.
+\end{align*}
+The first two terms are bounded by
+\(2C_{\mathrm{quad}}(N_s^{\mathrm{tot}})^{-2s/(d+1)}\)
+(Lemma~\ref{lem:joint-quadrature}); the third by
+\(2(\ln 10)^2\mu_{\max}^2\varepsilon'\) via
+Lemma~\ref{lem:log-linear} and~\eqref{eq:joint-tolerance}. Taking
+square roots:
+\[
+W_2 \;\le\; C_1'\sqrt{\varepsilon'} + C_2'(N_s^{\mathrm{tot}})^{-\beta'}.
+\tag{$\star'$}\label{eq:spectral-path-nonsep}
+\]
+\emph{Pathwise path.} Lemma~\ref{lem:mm} is unchanged:
+\(W_2 \le C_3\sqrt\delta\).
+
+\emph{Combined.} \(\min(a,b) \le a + b\) yields \eqref{eq:nonsep-bound}.
+\end{proof}
+
+\paragraph{Rate comparison.}
+The exponent \(\beta' = s/(2(d+1))\) is always weaker than the
+separable bias-only rate
+\(\beta_{\rm bias} = \tfrac12\min(s_x/d,\,s_t)\): separability permits
+estimating two lower-dimensional marginals (\(\mu^{\mathrm{xy}}\) in
+\(\mathbb R^d\), \(\mu^t\) in \(\mathbb R\)) rather than a single
+density in \(\mathbb R^{d+1}\), exploiting additional structure. Both
+\(\beta'\) and \(\beta_{\rm bias}\) are ensemble-target exponents; the
+single-realisation analogue of \(\beta'\) is not pursued here.
+Concrete values:
+\begin{center}
+\begin{tabular}{lcc}
+\toprule
+Setting & Separable \(\beta_{\rm bias}\) & Non-sep.\ \(\beta'\) \\
+\midrule
+\(s=1,\,d=2\) & \(\tfrac14\) & \(\tfrac16\) \\
+\(s=2,\,d=2\) & \(\tfrac12\) & \(\tfrac13\) \\
+\(s=1,\,d=3\) & \(\tfrac16\) & \(\tfrac18\) \\
+\bottomrule
+\end{tabular}
+\end{center}
+Despite the weaker rate, Proposition~\ref{thm:nonsep} is the
+appropriate result when the SPDE solution's covariance does not
+factorise, the generic case for L\'evy-driven equations with
+space-time-coupled forcing.
+
+\subsubsection{Discussion of the rate}
+
+\paragraph{Optimality.}
+The single-realisation exponent
+\(\beta_{\rm sr} = s_x/(2(2s_x+d))\) is the minimax-optimal rate for
+non-parametric spectral density estimation under
+$\alpha$-mixing~\cite{Dahlhaus1996} and is sharp without
+strengthening (A2) to analyticity. The bias-only exponent
+\(\beta_{\rm bias} = \tfrac12\min(s_x/d, s_t)\) coincides with the
+standard FFT quadrature rate for $H^s$ functions on a torus and is
+also sharp for the bias-only target. Under analytic $\mu$ the
+rates improve to spectral $\exp(-c\,N_s^{1/d})$, but this is not
+the relevant regime for L\'evy-driven fields.
+
+\paragraph{Floor regime.}
+For finite \(\varepsilon, \delta\) the \(\sqrt\varepsilon\) term
+dominates once \(N_s \gg \varepsilon^{-1/(2\beta_{\rm sr})}\). At the
+paper's operating point
+\(N_s = 24 \times 24 \times 96 \approx 5.5 \times 10^4\) with
+\(s_x = s_t = 1\), \(d = 2\) and hence \(\beta_{\rm sr} = 1/8\), the
+quadrature factor is \(N_s^{-\beta_{\rm sr}} \approx 0.25\) (versus the
+bias-only $N_s^{-\beta_{\rm bias}} \approx 0.065$ that would apply
+under ensemble averaging of the spectral target). For typical
+\(\varepsilon \approx 0.3\) the training-error term contributes
+\(\sim \mu_{\max}\sqrt{0.3}/\sqrt{\mu_{\min}}\), which is the
+dominant source of \(W_2\) error in this regime; the quadrature
+term is smaller by a factor depending on the unresolved
+\(\mu_{\max}/\sqrt{\mu_{\min}}\) ratio but does not vanish.
+
+\paragraph{Connection to numerical results.}
+For Burgers-VG (\(s_x = s_t = 1\), \(d = 2\),
+\(N_s \approx 5.5 \times 10^4\)),
+Proposition~\ref{thm:main} with \(\varepsilon \approx 0.4\) and
+\(\delta \approx 0.05\) predicts
+\(W_2 \le C_1 \cdot 0.63 + C_2 \cdot 0.065 + C_3 \cdot 0.22\).
+Corollary~\ref{cor:vr} translates this into a predicted variance gap;
+the empirical \(|1 - \mathrm{vr}| = 0.07\) is consistent with the
+bound under moderate values of \(C_1, C_3\).
+
+\paragraph{What is and is not proved.}
+Proposition~\ref{thm:main} bounds the law of the trained predictor
+by training-error and discretisation contributions, under the
+Gaussian-separable assumption (A1)--(A6), using the
+kernel-smoothed periodogram loss with bandwidth
+$h^\star = N_s^{-1/(2s_x+d)}$. The rigorous single-realisation
+exponent is $\beta_{\rm sr} = s_x/(2(2s_x+d))$; the bias-only
+exponent $\beta_{\rm bias} = \tfrac12\min(s_x/d,\,s_t)$
+(Remark~\ref{rem:bias-only-rate})
+is the faster rate observed empirically when the spectral target
+is averaged across realisations, but is a heuristic statement
+about the bias rather than a single-realisation guarantee. The
+non-separable case is addressed by Proposition~\ref{thm:nonsep}
+at the cost of the weaker rate $\beta' = s/(2(d+1))$.
+
+The L\'evy-driven case is treated only partially:
+Proposition~\ref{thm:levy-ext} bounds the Gaussian projection
+(second-order structure) without Gaussianity but does not control
+higher cumulants; Proposition~\ref{prop:levy-ito} extends to the
+full law under (A7) at the cost of an additive $4\sqrt J$
+correction, which is $O(\sqrt\nu)$ for VG drivers and is
+non-vanishing as $N_s \to \infty$. The pathwise Lemma~\ref{lem:mm}
+applied with a spline-interpolated L\'evy driver picks up an
+unbounded-variation jump-component interpolation error that does
+not vanish as $N_s \to \infty$ (see the remark following its proof);
+this is the principal obstacle to extending the rigorous main theorem
+to the L\'evy regime, and the open problem of a rate-form bound that
+scales with the spectral training tolerance is acknowledged.
+Proposition~\ref{cor:berry-esseen} quantifies cumulant-level
+tightness of the Gaussian-projection approximation at the marginal.
+Conjecture~\ref{prop:ntk} is conditional on the open positivity
+$\lambda_{\min}(K^{\rm spec}) > 0$ (Remark~\ref{rem:lambda-min});
+the end-to-end training-time statement is therefore not a theorem
+but a conjecture.
+
+The remaining open gaps are:
+(i) global optimality of the empirical risk minimiser in the
+non-convex landscape ($\varepsilon, \delta$ are assumed as attained
+endpoint values, not shown to be attainable by any finite
+computational procedure);
+(ii) a fully rigorous full-law convergence theorem for L\'evy-driven
+SPDEs that scales with the training loss rather than the
+jump-energy $J$;
+(iii) lower-bounding $\lambda_{\min}(K^{\rm spec}) > 0$ for the
+log-PSD NTK, which would upgrade Conjecture~\ref{prop:ntk} to a
+theorem;
+(iv) bounding the spline-interpolation error of an
+unbounded-variation L\'evy driver and absorbing it into a
+constructive $\delta$.
+Items (i)--(iv) are concrete future work.
+
+\subsubsection{End-to-end training-time bound}
+\label{subsec:training-time}
+
+\begin{conjecture}[End-to-end training-time bound, conditional on
+NTK positivity]
+\label{prop:ntk}
+\emph{Conditional on the open conjecture that the spectral-loss NTK
+satisfies $\lambda_{\min}(K^{\rm spec}) > 0$
+(Remark~\ref{rem:lambda-min}):} under (A1)--(A6) and (A9), with
+initial spectral loss
+$\varepsilon_0=\mathcal{L}_{\mathrm{spec}}(u_\theta(0))$:
+\begin{equation}
+\label{eq:w2-time}
+W_2(T)\;\le\;
+C_1\!\sqrt{\varepsilon_0\,e^{-\lambda_{\min}(K)\,T}
++\frac{C_{\mathrm{ntk}}}{\sqrt{m}}}
+\;+\;C_2\,N_s^{-\beta_{\rm sr}}\;+\;C_3\sqrt\delta.
+\end{equation}
+To reach $W_2(T_\star)\le\eta$, provided
+$\eta>C_2 N_s^{-\beta_{\rm sr}}+C_3\sqrt\delta
++C_1\sqrt{C_{\mathrm{ntk}}/\sqrt{m}}$,
+it suffices to train for
+\begin{equation}
+\label{eq:training-time}
+T_\star\;\ge\;
+\frac{1}{\lambda_{\min}(K)}\,
+\log\!\left(
+\frac{C_1^2\,\varepsilon_0}
+{\displaystyle\Bigl(\eta-C_2 N_s^{-\beta_{\rm sr}}-C_3\sqrt\delta\Bigr)^2
+-\dfrac{C_1^2\,C_{\mathrm{ntk}}}{\sqrt{m}}}
+\right).
+\end{equation}
+\end{conjecture}
+
+\begin{proof}[Argument conditional on $\lambda_{\min}(K^{\rm spec}) > 0$]
+Under (A9) and gradient flow, we assume the PL-type gradient
+inequality
+$\tfrac{d}{dT}\mathcal{L}_{\mathrm{spec}}
+\le -\lambda_{\min}(K)\mathcal{L}_{\mathrm{spec}}$
+holds for the log-PSD loss. This is the analogue of the standard
+NTK decay established by~\cite{Wang2022} for $L^2$ losses; its
+transfer to the non-linear, non-convex log-PSD loss is formal and
+requires $\lambda_{\min}(K)>0$, which is open (Remark~\ref{rem:lambda-min}).
+Granting the inequality, Gr\"onwall gives
+$\mathcal{L}_{\mathrm{spec}}(u_\theta(T))
+\le\varepsilon_0 e^{-\lambda_{\min}(K)T}+C_{\mathrm{ntk}}/\sqrt{m}$.
+Substituting into Proposition~\ref{thm:main} yields~\eqref{eq:w2-time}.
+Setting $W_2(T_\star)\le\eta$, isolating the exponential term, and
+taking logarithms gives~\eqref{eq:training-time}.
+$\hfill\square$
+\end{proof}
+
+\begin{remark}[Lower-bounding $\lambda_{\min}(K)$ for the spectral loss]
+\label{rem:lambda-min}
+Equation~\eqref{eq:training-time} is explicit in $\eta,N_s,\delta,m,\varepsilon_0$
+but depends on $\lambda_{\min}(K)$.
+For standard $L^2$ losses, $\lambda_{\min}(K)>0$ is guaranteed by the
+positive-definiteness of the NTK in the infinite-width
+limit~\cite{Wang2022}. For the log-PSD loss, the NTK Gram matrix
+entries involve $\nabla_\theta[\log\widehat{S}^{xy}(u_\theta)](x_i)
+\cdot\nabla_\theta[\log\widehat{S}^{xy}(u_\theta)](x_j)$,
+differing from the regression kernel by a $1/\widehat{S}^{xy}$
+preconditioning. Lower-bounding $\lambda_{\min}(K^{\mathrm{spec}})$
+for this loss is the principal remaining gap in
+making~\eqref{eq:training-time} fully constructive.
+\end{remark}
+
+\paragraph{Relation to existing PINN error analysis.}
+The result is a strict extension of the Mishra--Molinaro
+framework~\cite{MishraMolinaro2022}: removing the spectral loss from
+training drops the bound on \(\varepsilon\), so only
+\eqref{eq:pde-path} survives and the result reduces to the original
+\(W_2 \le C_3\sqrt\delta\); removing the PDE residual drops the bound
+on \(\delta\), so only \eqref{eq:spectral-path} survives, yielding a
+pure spectral-matching bound which is novel. The two paths give
+independent upper bounds on the same \(W_2\); they act on orthogonal
+aspects of the law (\(\delta\) on pathwise \(L^2\) distance,
+\(\varepsilon\) on the spectral measure) and the displayed
+\(C_1\sqrt\varepsilon + C_2 N_s^{-\beta_{\rm sr}} + C_3\sqrt\delta\) is the
+loose union via \(\min(a,b)\le a+b\), used here for symmetry with the
+training objective rather than for tightness.
+
+
+\section*{S2 \quad Numerical sanity check on Lemma~\ref{lem:single-realisation}}
+\label{app:smoothed-verification}
+
+We provide a small numerical sanity check that kernel-smoothing the
+single-realisation periodogram reduces $L^2$ estimation error on a
+synthetic Sobolev-regular spectral density, supporting the rigorous
+appeal to Lemma~\ref{lem:single-realisation} in
+Proposition~\ref{thm:main}.
+
+\paragraph{Setup.} 1D torus with $N \in \{64, 128, 256, 512, 1024, 2048\}$
+modes; spectral density $\mu(k) = (1 + k^2)^{-s}$ with $s = 1$
+(matching the Variance-Gamma regularity in the experiments).
+At each $N$ we sample $2048$ independent periodogram realisations,
+each $\hat S(k) = \tfrac12(\chi^2_2)\cdot\mu(k)$ with chi-squared draws
+indexed by $k$, then sweep a uniform-kernel bandwidth
+$h \in \{0, 1, 2, \dots\}$ in cells and report the per-mode MSE
+$\frac{1}{N}\sum_k(\hat S^{(h)}(k) - \mu(k))^2$ at the optimal $h$.
+Implementation in
+\texttt{scripts/verification/verify\_smoothed\_periodogram.py}.
+
+\paragraph{Observed behaviour.}
+At every $N$ the MSE-optimal smoothed estimator outperforms the raw
+periodogram by a factor of $\sim\!0.45$ (i.e., smoothed MSE is roughly
+half of raw MSE), with the optimal bandwidth $h^\star_{\rm cell} = 1$
+(a 3-point uniform smoother) across the tested range. The constant
+factor confirms the qualitative claim of
+Lemma~\ref{lem:single-realisation}: smoothing strictly improves the
+single-realisation $L^2$ estimation error.
+
+\paragraph{Caveat on the rate.}
+The predicted asymptotic rate
+$N^{-s/(2s+d)} = N^{-1/3}$ (here $d = 1$) is not cleanly recovered in
+this finite-$N$ regime: the per-mode-averaged MSE in our setup is
+itself a discretisation-dependent functional whose decay reflects both
+the estimator efficiency and the per-mode normalisation. A clean test
+of the rate would require either fixing the reference frequency
+window in continuum units (so the comparison normalisation does not
+shift with $N$) or measuring pointwise error at a fixed $k$ rather
+than the per-mode average. The estimator-improvement factor at the
+optimal bandwidth is what
+Lemma~\ref{lem:single-realisation} guarantees qualitatively; the
+rate result is from the established
+Dahlhaus--Brillinger non-parametric spectral estimation literature
+\cite{Dahlhaus1996,Brillinger1981} and is invoked as such in the proof.
+
+\paragraph{Connection to the Burgers experiments.}
+The Burgers experiments in Section~\ref{subsec:variance-gap} of the
+main paper use the raw periodogram in (A4) at training time, not the
+smoothed periodogram. Their interpretation in light of the rigorous
+single-realisation bound is therefore: the bias-only heuristic rate
+$\beta_{\rm bias} = 1/4$ describes the empirical grid-convergence
+behaviour observed there, while the rigorous single-realisation rate
+$\beta_{\rm sr} = 1/8$ guarantees consistency once the loss is
+evaluated against the kernel-smoothed periodogram instead.
+Re-running the Burgers training with kernel-smoothed targets is an
+expected operational confirmation but is not strictly required for
+the theory to apply --- the rigorous bound is a statement about the
+training procedure that uses the smoothed target. We do not retrain
+in this revision; the existing empirical results stand as evidence
+for the bias-only heuristic rate, which the theory's
+Remark~\ref{rem:bias-only-rate} explicitly identifies.
+
+\section*{S3 \quad L\'evy intensity threshold sweep}
+\label{app:levy-tau}
+
+We investigate whether a L\'evy intensity loss
+\(\mathcal{L}_{\lambda}\), a soft count of field exceedances
+above threshold \(\tau\sigma_{\mathrm{ref}}\), adds value
+over cumulant matching alone, in particular at extreme thresholds
+where cumulant matching might be expected to miss the rarest
+events.
+
+\subsection{Setup}
+
+We train 18 models on the Heston-VG volatility channel with
+randomised sub-grid: two loss modes
+(\texttt{levy}: intensity only; \texttt{levy\_cumulant}: intensity
++ fourth-cumulant) crossed with three thresholds
+\(\tau \in \{2, 3, 4\}\sigma_{\mathrm{ref}}\) and three training
+seeds, each evaluated on 5 validation seeds (90 evaluations
+total). The intensity loss weight is \(w_\lambda = 10{,}000\).
+All other hyperparameters are as in Table~\ref{tab:hyper}.
+
+\subsection{Results}
+
+\begin{table}[h]
+\centering
+\caption{L\'evy intensity threshold sweep, V channel. Mean
+$\pm$ standard deviation across 15 evaluations (3 train
+$\times$ 5 val seeds). Reference: vr = 1.0,
+$\kappa_4 = 27.3$, jf\(_3\sigma\) = 0.0238.}
+\label{tab:levy-tau}
+\begin{tabular}{l c c c c c}
+\toprule
+mode & $\tau$ & var.\ ratio & kurtosis & jf\(_3\sigma\) pred & jf\(_3\sigma\) ref \\
+\midrule
+levy & 2 & $0.910 \pm 0.095$ & $10.1 \pm 3.1$ & $0.0264$ & $0.0238$ \\
+levy & 3 & $0.921 \pm 0.091$ & $8.1 \pm 2.2$ & $0.0267$ & $0.0238$ \\
+levy & 4 & $0.930 \pm 0.099$ & $8.5 \pm 1.0$ & $0.0319$ & $0.0238$ \\
+\midrule
+levy\_cumulant & 2 & $0.923 \pm 0.098$ & $24.7 \pm 1.0$ & $0.0269$ & $0.0238$ \\
+levy\_cumulant & 3 & $0.923 \pm 0.096$ & $25.1 \pm 0.7$ & $0.0256$ & $0.0238$ \\
+levy\_cumulant & 4 & $0.921 \pm 0.092$ & $24.9 \pm 0.5$ & $0.0256$ & $0.0238$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Conclusions}
+
+Three conclusions follow from Table~\ref{tab:levy-tau}:
+
+\begin{enumerate}
+\item \textbf{L\'evy-only misses kurtosis at every threshold.}
+Even at $\tau = 4\sigma$ (the most extreme threshold, targeted
+at the rarest events), the \texttt{levy} variant reproduces
+variance (\(\mathrm{vr} \approx 0.93\)) but achieves kurtosis
+of only 8.5 vs.\ reference 27.3. The intensity loss, counting
+exceedances above a threshold, does not carry the same information
+as the fourth-cumulant penalty.
+
+\item \textbf{The threshold $\tau$ is irrelevant for
+\texttt{levy\_cumulant}.} Kurtosis, variance ratio, and jump
+frequency are statistically identical across $\tau \in
+\{2, 3, 4\}\sigma$ (within one standard deviation). The
+cumulant term dominates, and the intensity loss adds nothing.
+
+\item \textbf{L\'evy intensity matching is redundant.} The
+\texttt{levy\_cumulant} results are indistinguishable from the
+\texttt{cumulant}-only results in Table~\ref{tab:heston-2x4}.
+We conclude that the L\'evy intensity penalty can be safely
+dropped from the loss without any degradation in the reported
+metrics.
+\end{enumerate}
+
+The \texttt{levy}-only variant reproduces variance correctly
+(same as all randomised-subgrid variants) but leaves kurtosis
+near-Gaussian, confirming the orthogonality of variance-gap
+closure and kurtosis matching identified in
+Section~\ref{subsec:heston-diag}.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section*{S4 \quad Full-law convergence for L\'evy drivers via Zolotarev
+metrics}
+\label{app:zolotarev}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This appendix resolves the two obstacles identified in
+Section~3 of the main text for the L\'evy extension: the
+non-vanishing $4\sqrt J$ Gaussian-projection gap of
+Proposition~\ref{prop:levy-ito}, and the $\Theta(1)$ spline-smoothing
+jump floor of the pathwise leg (Remark after Lemma~\ref{lem:mm}). It
+also provides the first finite law-distance bound for $\alpha$-stable
+drivers with $\alpha < 2$, for which $W_2 = \infty$ and
+Assumption~(A7) fails. The price is a change of metric: results are
+stated in the Zolotarev ideal metric $\zeta_s$,
+$s \in (1, 2]$~\cite{Zolotarev1976}, and transferred back to
+Wasserstein distances where the latter are finite
+\cite{Rio2009,BolbotowskiBouchitte2025}.
+
+\subsection{Setting}
+
+Let $H := L^2(\Omega \times [0,T])$ and let the driver be bandlimited
+to modes $|k| \le K$, $J_K := \#\{k\}$, consistently with the sub-grid
+reading of (A3). Write $\lambda_k$ for the symbol of the parabolic
+operator on mode $k$, $g_k(\tau) = e^{-\lambda_k\tau}\mathbf 1_{\tau>0}$,
+and $h$ for the temporal resolution of the driver grid. Throughout,
+$h \le \lambda_K^{-1}$ (the FD solver's own stability regime). Driver
+classes: \emph{(VG)} Variance-Gamma, jump second moment
+$m_2 := \int z^2\nu(dz) < \infty$, $s = 2$; \emph{($\alpha$S)}
+symmetric $\alpha$-stable, $\alpha \in (1,2)$, $s \in (1,\alpha)$,
+compensated (It\^o) convention.
+
+The experimental pipeline couples all objects on one probability
+space: the FD reference $u_{\mathrm{FD}}$ is driven by a realisation
+$L$; training evaluates residuals against the spline smoothing
+$\tilde L = \mathcal S_h L$ of the \emph{same} increments. We use two
+exact mild solutions as intermediaries: $\bar u$ (driven by
+$\tilde L$) and $u^\star$ (driven by $L$). The error chain is
+\[
+u_\theta
+\;\overset{\text{Lem.~\ref{lem:ls-stability}}}{\longleftrightarrow}\;
+\bar u
+\;\overset{\text{Lem.~\ref{lem:smoothing-law}}}{\longleftrightarrow}\;
+u^\star
+\;\overset{\varepsilon_{\mathrm{num}}}{\longleftrightarrow}\;
+u_{\mathrm{FD}},
+\]
+where $\varepsilon_{\mathrm{num}}$ is the strong numerical error of
+the reference solver, cited from the literature
+\cite{PeszatZabczyk2007} and not re-derived here.
+
+\subsection{The Zolotarev metric on $H$}
+
+For $s = 1 + \beta$, $\beta \in (0,1]$, let
+\[
+\Lambda_s := \bigl\{f : H \to \mathbb R \ \text{Fr\'echet-}C^1,\
+\|f'(x) - f'(y)\|_{H^*} \le \|x-y\|^\beta \ \forall x, y\bigr\},
+\qquad
+\zeta_s(\mu,\nu) := \sup_{f \in \Lambda_s}
+\Bigl|\int f\,d\mu - \int f\,d\nu\Bigr|.
+\]
+$\zeta_s$ is \emph{ideal of order $s$}: translation-regular and
+$s$-homogeneous under dilations~\cite{Zolotarev1976}. Since
+$\Lambda_s$ contains every continuous linear functional,
+$\zeta_s(\mu,\nu) < \infty$ requires equal means; we therefore state
+bounds for the composite
+\[
+\rho_s(X, Y) := \zeta_s\bigl(\mathcal L(X - \mathbb EX),\,
+\mathcal L(Y - \mathbb EY)\bigr) + \|\mathbb EX - \mathbb EY\|_H,
+\]
+which metrises the same topology (weak convergence plus $s$-moment
+convergence). Two transfer results recover Wasserstein control:
+$\tfrac14 W_2^2 \le \zeta_2$ on $\mathcal P_2(\mathbb R^d)$ for every
+$d$, with sharp dimension-free
+constant~\cite[Thm.~3.1]{BolbotowskiBouchitte2025}; and
+$W_s^s \le c_s\,\zeta_s$ on $\mathbb R$ for
+$s \in (1,2]$~\cite{Rio2009}.
+
+\begin{lemma}[Taylor coupling bound]\label{lem:zeta-coupling}
+Let $X, Y \in L^s(\mathbb P; H)$ with $\mathbb EX = \mathbb EY$. Then
+\[
+\zeta_s(\mathcal L X, \mathcal L Y) \;\le\;
+\bigl(\mathbb E\|Y\|^s\bigr)^{\frac{s-1}{s}}
+\bigl(\mathbb E\|X-Y\|^s\bigr)^{\frac 1s}
++ \mathbb E\|X-Y\|^s.
+\]
+\end{lemma}
+
+\begin{proof}
+Fix $f \in \Lambda_s$ and set
+$g(x) := f(x) - f(0) - \langle f'(0), x\rangle$; then $g \in
+\Lambda_s$, $g'(0) = 0$, and the affine part cancels in
+$\mathbb E f(X) - \mathbb E f(Y)$ by mean equality. From $g'(0) = 0$
+and the H\"older property, $\|g'(x)\| \le \|x\|^\beta$. Along the
+segment from $Y$ to $X$,
+\[
+|g(X) - g(Y)| \le \int_0^1
+\bigl(\|Y\| + t\|X-Y\|\bigr)^\beta dt\,\|X-Y\|
+\le \|Y\|^{s-1}\|X-Y\| + \|X-Y\|^s,
+\]
+using $(a+b)^\beta \le a^\beta + b^\beta$ for $\beta \le 1$. Take
+expectations and apply H\"older with exponents
+$\tfrac{s}{s-1}, s$ to the first term.
+\end{proof}
+
+\begin{lemma}[Residual stability in $L^s$]\label{lem:ls-stability}
+Linear case: pathwise, $u_\theta - \bar u$ solves the deterministic
+parabolic equation with source equal to the training residual
+$r_\theta$ (both objects see the same smoothed driver), so parabolic
+stability gives
+$\mathbb E\|u_\theta - \bar u\|_H^s \le C_{\mathrm{stab}}^s\,\delta_s$
+with $\delta_s := \mathbb E(\|r_\theta\|_{H'} +
+\|u_\theta(\cdot,0) - u_0\|)^s$. Semilinear case (Burgers-VG): same
+statement under the well-posedness hypothesis of
+\cite[Thm.~3.4]{MishraMolinaro2022}, with $C_{\mathrm{stab}}$ from a
+Gr\"onwall argument on a ball containing both trajectories.
+\end{lemma}
+
+Note that $\delta_s$ is precisely a trainable residual loss with
+exponent $s$; see Remark~\ref{rem:loss-exponent}.
+
+\begin{lemma}[Driver smoothing vanishes in law]\label{lem:smoothing-law}
+Let $Z := u^\star - \bar u = \int_0^\cdot S_{\cdot - \sigma}\,
+d(L - \tilde L)(\sigma)$, with per-mode mismatch kernel
+$R_k(t,\sigma) = g_k(t-\sigma) - (g_k * K_h)(t-\sigma)$, $K_h$ the
+spline kernel of mass $1$ and support $O(h)$. Then, for
+$h \le \lambda_K^{-1}$:
+\[
+\bigl(\mathbb E\|Z\|_H^s\bigr)^{1/s} \;\le\;
+\begin{cases}
+C_{\mathrm{VG}}\; J_K^{1/2}\, h^{1/2}, & \text{(VG)},\ s = 2,\\[3pt]
+c_{\alpha,s}\, C\,(T J_K)^{1/\alpha}\, h^{1/2}, &
+\text{($\alpha$S)},\ s < \alpha,
+\end{cases}
+\]
+with $C_{\mathrm{VG}}^2 = c_0\, m_2 T$ explicit.
+\end{lemma}
+
+\begin{proof}
+\emph{Kernel sections.} For fixed $\sigma$, the section
+$t \mapsto R_k(t, \sigma)$ consists of a jump-mismatch region
+$t \in (\sigma, \sigma + ch)$ where $|R_k| = O(1)$, and a smooth tail
+where $|R_k| \le c\,h\,\lambda_k e^{-\lambda_k(t-\sigma)}$. Hence
+\[
+\|R_k(\cdot, \sigma)\|_{L^2_t}^2 \le c_0 h + c_1 h^2 \lambda_k
+\le C^2 h
+\quad\text{for } h\lambda_k \le 1.
+\]
+
+\emph{(VG).} The It\^o isometry for compensated Poisson integrals in
+Hilbert space~\cite{PeszatZabczyk2007} gives
+\[
+\mathbb E\|Z\|_H^2 = \sum_{|k|\le K}\int_0^T
+\|R_k(\cdot,\sigma)\|_{L^2_t}^2\, m_2\, d\sigma
+\le m_2\, T\, J_K\, C^2 h,
+\]
+and $(\mathbb E\|Z\|^s)^{1/s} \le (\mathbb E\|Z\|^2)^{1/2}$ for
+$s \le 2$.
+
+\emph{($\alpha$S).} $Z$ is a jointly S$\alpha$S element of $H$ with
+scale parameter
+\[
+\sigma_Z^\alpha = \sum_{|k| \le K}\int_0^T
+\bigl\|R_k(\cdot, \sigma)\bigr\|_{L^2_t}^{\alpha}\, d\sigma
+\]
+(the $H$-norm is taken \emph{inside}, the $L^\alpha$ integral over
+the random-measure variable $\sigma$ \emph{outside}). By the LePage
+series representation and the equivalence of moments of stable norms
+\cite[Ch.~3]{SamorodnitskyTaqqu1994}\cite[Ch.~5]{LedouxTalagrand1991},
+$(\mathbb E\|Z\|_H^s)^{1/s} \le c_{\alpha,s}\,\sigma_Z$ for every
+$s < \alpha$. Substituting the section estimate,
+$\sigma_Z \le (T J_K)^{1/\alpha} C h^{1/2}$.
+\end{proof}
+
+\begin{remark}[Numerical verification]\label{rem:lemA3-verify}
+A single-mode Monte-Carlo verification
+(\texttt{scripts/verify\_lemma\_A3.py}; $T = 1$, fine grid $2^{16}$,
+$\lambda \in \{4, 25\}$, $h \in [2.4\times 10^{-4},
+6.3\times 10^{-2}]$, fits restricted to $\lambda h \le 1$) confirms
+both rates. VG ($256$ replications): log--log slopes $+0.492$ and
+$+0.504$ against the predicted $+1/2$, with the ratio
+$\mathbb E\|Z\|^2/(m_2 T h)$ flat at $\approx 1/6$ across two decades
+of $h$, suggesting the sharp constant $c_0 = 1/6$ for linear splines.
+$\alpha$S ($\alpha = 1.5$, $1024$ replications): the robust median
+estimator gives slopes $+0.495$ and $+0.483$, confirming $h^{1/2}$.
+(An $L^{1.2}$-moment estimator is unreliable here — it has infinite
+variance for $2s > \alpha$ — and is reported only as a consistency
+check.) An earlier draft of this lemma claimed the rate
+$h^{1/\alpha}$ for the stable case via an incorrect norm composition
+in $\sigma_Z$; the verification falsified that exponent and the
+statement above is the corrected one.
+\end{remark}
+
+\begin{lemma}[Cylindrical lift of the sharp Rio inequality]
+\label{lem:bb-lift}
+For centred $\mu, \nu \in \mathcal P_2(H)$, $H$ separable Hilbert:
+$W_2^2(\mu,\nu) \le 4\,\zeta_2(\mu,\nu)$.
+\end{lemma}
+
+\begin{proof}
+Let $\pi_m : H \to \mathbb R^m$ project onto the first $m$
+coordinates of a fixed orthonormal basis. For
+$f \in \Lambda_2(\mathbb R^m)$, the chain rule gives
+$(f \circ \pi_m)'(x) = \pi_m^* f'(\pi_m x)$ and
+$\|\pi_m^*(f'(\pi_m x) - f'(\pi_m y))\| \le \|\pi_m(x-y)\| \le
+\|x - y\|$, so $f \circ \pi_m \in \Lambda_2(H)$ and
+$\zeta_2(\pi_m\#\mu, \pi_m\#\nu) \le \zeta_2(\mu,\nu)$. By
+\cite[Thm.~3.1]{BolbotowskiBouchitte2025} in $\mathbb R^m$ (constant
+$4$, dimension-free),
+$W_2^2(\pi_m\#\mu, \pi_m\#\nu) \le 4\zeta_2(\mu,\nu)$. Finally
+$W_2(\pi_m\#\mu, \pi_m\#\nu) \uparrow W_2(\mu,\nu)$: optimal
+couplings of the projected pairs are tight, any weak limit point is a
+coupling of $(\mu,\nu)$, and the cost converges by monotone
+convergence along the increasing projections.
+\end{proof}
+
+\subsection{Main result}
+
+\begin{proposition}[Full-law convergence for L\'evy-driven Bochner
+PINNs]\label{prop:zeta-main}
+Assume (A1)--(A4), bandlimited drivers, the shared-driver coupling,
+and Lemma~\ref{lem:ls-stability}'s stability hypothesis. Let $s = 2$
+(VG) or $s \in (1, \alpha)$ ($\alpha$S), and set
+$\Delta_s := (\mathbb E\|u_\theta - u_{\mathrm{FD}}\|_H^s)^{1/s}$.
+Then
+\[
+\Delta_s \;\le\; C_{\mathrm{stab}}\,\delta_s^{1/s}
++ C_{\mathrm{sm}}\, J_K^{\gamma}\, h^{1/2}
++ \varepsilon_{\mathrm{num}},
+\qquad \gamma = \tfrac12\ \text{(VG)},\ \tfrac1\alpha\ \text{($\alpha$S)},
+\]
+and consequently, with
+$M_s := (\mathbb E\|u_{\mathrm{FD}}\|_H^s)^{1/s}$,
+\[
+\rho_s\bigl(u_\theta, u_{\mathrm{FD}}\bigr) \;\le\;
+M_s^{\,s-1}\,\Delta_s + \Delta_s^{\,s} + \Delta_s.
+\]
+All constants are explicit and finite for both driver classes; no
+Gaussianity is assumed, no additive jump-energy floor appears, and
+the bound is finite for $\alpha$-stable drivers with
+$s < \alpha$.
+\end{proposition}
+
+\begin{proof}
+The triangle inequality in $L^s(\mathbb P; H)$ along the chain
+$u_\theta \to \bar u \to u^\star \to u_{\mathrm{FD}}$, using
+Lemma~\ref{lem:ls-stability}, Lemma~\ref{lem:smoothing-law}, and the
+solver error, gives the bound on $\Delta_s$. Apply
+Lemma~\ref{lem:zeta-coupling} to the centred pair (centring changes
+$\Delta_s$ by at most a factor $2$, absorbed into constants); the
+mean discrepancy is bounded by
+$\|\mathbb E u_\theta - \mathbb E u_{\mathrm{FD}}\| \le \Delta_s$ by
+Jensen.
+\end{proof}
+
+\begin{corollary}[VG: Wasserstein bound without the $4\sqrt J$
+floor]\label{cor:vg-floorfree}
+By Lemma~\ref{lem:bb-lift}, for the VG class,
+\[
+W_2\bigl(\mathcal L(u_\theta), \mathcal L(u_{\mathrm{FD}})\bigr)
+\;\le\; 2\sqrt{\rho_2}
+\;\lesssim\; 2 M_2^{1/2} \Delta_2^{1/2}
+\quad (\Delta_2 \text{ small}).
+\]
+Unlike Proposition~\ref{prop:levy-ito}, this vanishes as training and
+grids refine ($\delta_2 \to 0$, $h \to 0$): the $4\sqrt J$ term of
+the L\'evy--It\^o coupling is replaced by the vanishing
+$C\sqrt{J_K h}$. The two bounds are complementary; their minimum is
+operative.
+\end{corollary}
+
+\begin{corollary}[$\alpha$-stable: first finite law bound]
+\label{cor:stable}
+For $\alpha \in (1, 2)$ and $s \in (1, \alpha)$,
+$\rho_s(u_\theta, u_{\mathrm{FD}})$ is finite and converges to zero
+under training and grid refinement. On mollified marginals
+$\langle u, \varphi\rangle$, $\varphi \in H$, Rio's
+inequality~\cite{Rio2009} transfers this to
+$W_s \le (c_s \zeta_s)^{1/s}$.
+\end{corollary}
+
+\begin{remark}[Loss exponent for heavy tails: a caution]
+\label{rem:loss-exponent}
+The bound above is stated for $s < \alpha$, which is required only so
+that the $s$-th moments in Lemma~\ref{lem:ls-stability} are finite. It
+is tempting to read this as a training prescription---that heavy-tailed
+drivers \emph{should} be fitted with an $L^s$-residual, $s < \alpha$,
+since the MSE residual ($s = 2$) has an infinite-variance stochastic
+gradient when the driver is redrawn at each step. We caution against
+that reading (see Appendix~S5). The infinite-variance gradient arises
+only under fresh-draw (amortised or operator) training; for the
+single-realisation training used here the driver is a \emph{fixed
+finite field}, the residual-gradient variance is finite for every
+exponent, and $L^2$ is well posed. Where the concern does apply, an
+$L^s$-residual with $s < \alpha$ down-weights precisely the
+extreme-forcing residuals that carry the heavy tail, and so
+\emph{suppresses} the tail it is meant to model. The exponent
+$s < \alpha$ is therefore a device for stating a finite bound, not a
+recommended training loss.
+\end{remark}
+
+\begin{remark}[Scope]\label{rem:zeta-scope}
+The results of this appendix use the shared-driver coupling of the
+experimental pipeline and therefore certify the trained surrogate
+against the reference realisation's law. The ensemble setting (no
+coupling) requires distributional losses beyond second order —
+second-order information cannot pin a non-Gaussian law (polyspectral
+phase freedom). A characteristic-functional probe loss with an
+Esseen-type smoothing transfer to $\zeta_s$ is the natural candidate
+and is left to future work. The spectral leg of
+Proposition~\ref{thm:main} remains complementary: it is what excludes
+the variance-collapse failure mode, which
+Proposition~\ref{prop:zeta-main} alone does not address.
+\end{remark}
+
+\begin{remark}[Scope of the certificate for tail risk]
+\label{rem:zeta-not-var}
+Proposition~\ref{prop:zeta-main} certifies the law of $u_\theta$ in the
+Zolotarev metric $\zeta_s$, which metrises weak convergence together
+with $s$-th moment convergence. It does \emph{not}, on its own, control
+tail quantiles (VaR/ES): $\zeta_s$ acts on the smooth test class
+$\Lambda_s$, whereas a quantile at a fixed level is a non-smooth
+functional. Indeed, by the Taylor-coupling bound
+(Lemma~\ref{lem:zeta-coupling}) one may make $\zeta_s$ arbitrarily small
+while two $p$-quantiles differ by a fixed gap, by transporting a small
+mass across a low-density region at the quantile. A quantile transfer is
+restored only under a density lower bound $f \ge c > 0$ on a
+neighbourhood of the quantile, giving
+$\lvert \Delta\,\mathrm{VaR}_p \rvert \lesssim \zeta_s^{1/s}/c$. The
+certificate is thus a law-distance guarantee, and we make no claim of
+tail-quantile accuracy for the surrogate absent such a regularity
+assumption.
+\end{remark}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section*{S5 \quad Numerical verification of the reference solver and standing assumptions}
+\label{app:audit}
+% ─────────────────────────────────────────────────────────────────────────────
+
+This appendix verifies, against direct computation, the quantities the
+main convergence bound cites or assumes: the finite-difference reference
+error $\varepsilon_{\mathrm{num}}$, the separability assumption of
+Proposition~\ref{thm:main}, the tightness and residual prescription of
+the Zolotarev certificate, and floating-point adequacy. Scripts are
+listed in \S S5.5.
+
+\subsection{The reference-solver error $\varepsilon_{\mathrm{num}}$}
+For the linear per-mode equation $du = -\lambda u\,dt + dL$ with
+symmetric $\alpha$-stable $L$, the mild solution
+$u(T) = \int_0^T e^{-\lambda(T-s)}\,dL(s)$ is symmetric $\alpha$-stable
+with closed-form scale
+$c_\star = \big((1-e^{-\alpha\lambda T})/(\alpha\lambda)\big)^{1/\alpha}$;
+the Euler--Maruyama reference produces an iterate that is itself exactly
+$S\alpha S$ with the \emph{same} $\alpha$, so $\varepsilon_{\mathrm{num}}$
+reduces to a pure scale error. Measured, the temporal order is
+$p \approx 1.00$ uniformly in $\alpha \in \{1.3,\dots,1.9\}$ and in the
+mode rate $\lambda$, and the tail index is preserved to within $0.006$
+($\hat\alpha = 1.896,\,1.693,\,1.506,\,1.300$ against
+$1.9,\,1.7,\,1.5,\,1.3$). The second-order central spatial stencil gives
+$O(\Delta x^2)$ error provided the grid over-resolves the driver band
+(Nyquist $\ge 2K$); under broadband forcing it degrades, the
+near-Nyquist modes being damped at $\approx 0.4\times$ the true rate.
+The configurations of Section~4 satisfy $\Delta x \ll \sqrt{D\,T}$ with
+effective band well below Nyquist, so the spatial error is sub-percent.
+In the nonlinear (stochastic Burgers) case, Variance-Gamma forcing
+converges at order $1$; $\alpha$-stable forcing exhibits a rare-event
+blow-up (robust across advection schemes, non-monotone in the driver
+scale), the numerical signature of the a priori $L^\infty$ bound that
+unbounded jumps violate---the regime to which the semilinear certificate
+of \S S4 restricts itself. Hence
+$\varepsilon_{\mathrm{num}} = O(\Delta t) + O(\Delta x^2)$ throughout the
+regime used here.
+
+\subsection{The separability assumption, measured}
+We quantify non-separability as the relative error of approximating the
+joint two-dimensional power spectral density by the product of its
+marginals. The analytic $z$-field (linear Ornstein--Uhlenbeck per mode,
+Lorentzian joint spectrum) has index $0.30$ ($0.13$ best rank-one); the
+empirical fields, as the loss sees them, are $0.116$, $0.049$, $0.0015$,
+ordered by damping. A cost ablation (the paper loss versus the paper
+loss augmented with a joint-PSD term, three seeds) shows the separable
+loss already reproduces the true coupling (learned non-separability
+index $0.111$ against true $0.107$) with a \emph{better} variance ratio
+($0.944$ versus $0.920$); the joint term improves only the low-power
+spectral bins. The PDE residual, not the spectral loss, supplies the
+space--time coupling, so separability is a quantitatively good
+approximation here, controlled by field damping.
+
+\subsection{Zolotarev certificate: tightness and residual exponent}
+At the operating point the bound is $\approx 12\%$ of the field scale,
+its distinctive smoothing term $C_{\mathrm{sm}}(J_K h)^{1/2}$ only
+$3.8\%$ (subdominant, on the verified constant of
+Lemma~\ref{lem:zeta-coupling} and its companions): non-vacuous, with
+total tightness gated by the training residual. Under $\alpha$-stable
+forcing the $L^2$ (MSE) residual has infinite-variance stochastic
+gradients---the sample gradient variance does not converge, and a single
+jump remains $\sim 1\%$ of the whole gradient at $N = 10^6$---whereas the
+$L^s$ residual ($s < \alpha$) has finite-variance gradients \emph{when the
+driver is redrawn at each step}. This does not, however, warrant $L^s$
+residual training in general, and we correct the prescription here. For the
+single-realisation training used in this paper the driver is a \emph{fixed
+finite field}, so the minibatch residual-gradient variance is finite for
+every exponent and $L^2$ is well posed; the infinite-variance concern applies
+only to amortised or operator learning that draws fresh realisations.
+Moreover, $L^s$ with $s < \alpha$ down-weights the large residuals located at
+the extreme-forcing points that carry the heavy tail, and therefore
+\emph{suppresses} the tail it is meant to model (empirically, a variance ratio
+of $0.26$ and a $99$th-percentile tail ratio of $0.37$, against $1.04$ and
+$0.96$ for $L^2$). The $L^s$ residual is thus either unnecessary (single
+realisation) or a gradient-versus-tail tradeoff (fresh draws), not a remedy.
+The certificate's scope for tail risk is stated in
+Remark~\ref{rem:zeta-not-var}.
+
+\subsection{Floating-point adequacy}
+The higher-order autograd residual was checked for \texttt{fp32}
+contamination (catastrophic cancellation between $u_t$ and $D\,u_{xx}$).
+On an exact solution, where the residual is identically zero, the
+\texttt{fp32} output is bitwise $0$; on a trained network the
+\texttt{fp32} numerical error is $1.2\times10^{-7}$, six orders of
+magnitude below the residual the network actually reaches
+($3.4\times10^{-2}$). \texttt{fp32} is therefore adequate---residual
+faithfulness is limited by approximation capacity, not precision, and
+the method requires no \texttt{fp64} hardware.
+
+\subsection{Reproducibility}
+NumPy/PyTorch scripts (\texttt{float64} linear algebra):
+\texttt{fd\_convergence\_stable\{,\_spatial,\_nonlinear\}.py}
+($\varepsilon_{\mathrm{num}}$); \texttt{separability\_index.py} and
+\texttt{ablation\_separability.py} (separability);
+\texttt{zolotarev\_\{bound\_tightness,grad\_variance,var\_transfer\}.py}
+(certificate); and \texttt{fp32\_residual\_floor.py} (floating point).
+All are included in the repository named in the ``Code and data
+availability'' statement of the main text.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
+
+\end{document}

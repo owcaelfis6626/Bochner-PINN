@@ -1,0 +1,127 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,booktabs,microtype}
+\newtheorem{remark}{Remark}
+\title{\vspace{-2em}Audited Foundations of the Bochner--PINN:\\
+Numerical Verification, the L\'evy Certificate's Scope, and Reproducibility\\[0.3em]
+\large (Addendum, bound with the main paper and supplementary material)}
+\author{Hubert Lipski}
+\date{July 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This addendum reports a post-hoc audit of the numerical foundations and standing
+assumptions of the Bochner--PINN construction. Each cited or assumed quantity---the
+reference-solver error $\varepsilon_{\mathrm{num}}$, the separability assumption, the
+Zolotarev bound's tightness and residual prescription, and floating-point adequacy---is
+verified against direct computation. The L\'evy full-law certificate of Appendix~S4 is
+refined in scope. The recurring finding is that the paper's \emph{existence} and
+\emph{ceiling} statements are robust, while its scope conditions are now made explicit and
+measured. All results reproduce from the scripts listed in \S6.
+\end{abstract}
+
+\section{The reference-solver error $\varepsilon_{\mathrm{num}}$, measured}
+The main convergence bound cites the finite-difference reference error
+$\varepsilon_{\mathrm{num}}$ rather than deriving it for $\alpha$-stable ($\alpha<2$)
+drivers. We verify it against an exact baseline. For the linear per-mode equation
+$du=-\lambda u\,dt+dL$ with symmetric $\alpha$-stable $L$, the mild solution
+$u(T)=\int_0^T e^{-\lambda(T-s)}dL(s)$ is symmetric $\alpha$-stable with closed-form scale
+$c_\star=\big((1-e^{-\alpha\lambda T})/(\alpha\lambda)\big)^{1/\alpha}$; the Euler--Maruyama
+reference produces an iterate that is \emph{itself exactly} $S\alpha S$ with the \emph{same}
+$\alpha$, so $\varepsilon_{\mathrm{num}}$ reduces to a pure scale error. Measured, the
+temporal order is $p\approx1.00$ uniformly in $\alpha$ and in the mode rate $\lambda$, and
+the tail index is preserved to within $0.006$:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+$\alpha$ (true) & $1.90$ & $1.70$ & $1.50$ & $1.30$\\
+$\hat\alpha$ (FD iterate) & $1.896$ & $1.693$ & $1.506$ & $1.300$\\
+temporal order $p$ & $\approx 1.0$ & $\approx 1.0$ & $\approx 1.0$ & $\approx 1.0$\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Both reference solvers use a $3$-point central spatial stencil, whose error is
+$O(\Delta x^2)$ provided the grid over-resolves the driver band (Nyquist $\ge 2K$); under
+broadband forcing it degrades, the near-Nyquist modes being damped at $\approx0.4\times$ the
+true rate. The paper's configuration ($N_x=128$, $D_z=0.05$, $T=1$) satisfies
+$\Delta x\approx0.047\ll\sqrt{D_zT}=0.224$ with an effective field band $\approx5$ against
+Nyquist $64$, so the spatial error is sub-percent. In the nonlinear (stochastic Burgers)
+case, VG forcing converges at order $1$, while $\alpha$-stable forcing exhibits a
+rare-event blow-up (robust across advection schemes, non-monotone in $\sigma$)---the
+numerical signature of the a priori $L^\infty$ bound that unbounded jumps violate, exactly
+the regime to which the semilinear certificate restricts itself. Hence
+$\varepsilon_{\mathrm{num}}=O(\Delta t)+O(\Delta x^2)$ throughout the regime the paper uses,
+and the one divergent corner coincides with the theory's own scope restriction.
+
+\section{The separability assumption, measured}
+The spectral loss matches the two \emph{marginal} PSDs, exact only if the joint spectrum
+factorises. We quantify non-separability as the relative error of approximating the joint
+$2$-D PSD by the product of its marginals. The analytic $z$-field (linear OU per mode,
+Lorentzian joint spectrum) has index $0.30$ ($0.13$ best rank-$1$); the empirical fields,
+as the loss sees them, are $z\!:\,0.116$, $y\!:\,0.049$, $p\!:\,0.0015$---ordered by
+damping. A cost ablation (paper loss vs.\ paper loss $+$ a joint-PSD term, three seeds)
+shows the separable loss already reproduces the true coupling (learned non-separability
+index $0.111$ vs.\ true $0.107$) with a \emph{better} variance ratio ($0.944$ vs.\ $0.920$);
+the joint term improves only the low-power spectral bins. The PDE residual, not the
+spectral loss, carries the space--time coupling; separability is a quantitatively good
+approximation here, with field damping as the controlling knob.
+
+\section{The Zolotarev certificate: tightness, residual exponent, and scope}
+At the operating point the bound is $\approx 12\%$ of the field scale, and its distinctive
+smoothing term $C_{\mathrm{sm}}(J_Kh)^{1/2}$ is only $3.8\%$ (subdominant, on the verified
+Lemma-A3 constant): non-vacuous, with total tightness gated by the training residual. Under
+$\alpha$-stable forcing the $L^2$ (MSE) residual has infinite-variance stochastic gradients
+(the sample gradient variance does not converge; a single jump remains $\sim1\%$ of the
+whole gradient at $N=10^6$), whereas the $L^s$ residual ($s<\alpha$) has finite-variance
+gradients. The residual must therefore be trained in $L^s$, $s<\alpha$---the prescription
+the certificate implies.
+
+\begin{remark}[Scope of the certificate for tail risk]
+Theorem~A (Appendix~S4) certifies the law of $u_\theta$ in the Zolotarev metric $\zeta_s$,
+which metrises weak convergence together with $s$-th moment convergence. It does
+\emph{not}, on its own, control tail quantiles (VaR/ES): $\zeta_s$ acts on a smooth test
+class, whereas a quantile at a fixed level is a non-smooth functional. By the
+Taylor-coupling bound one may make $\zeta_s$ arbitrarily small while two $p$-quantiles
+differ by a fixed gap, by transporting a small mass across a low-density region at the
+quantile. A quantile transfer is restored only under a density lower bound $f\ge c>0$ near
+the quantile, giving $\lvert\Delta\,\mathrm{VaR}_p\rvert\lesssim\zeta_s^{1/s}/c$. The
+certificate is thus a law-distance guarantee; we make no claim of tail-quantile accuracy
+absent such a regularity assumption.
+\end{remark}
+
+\section{Floating-point adequacy}
+The higher-order autograd residual was suspected of \texttt{fp32} contamination
+(catastrophic cancellation between $u_t$ and $D\,u_{xx}$). Measured: on an exact solution,
+where the residual is identically zero, the \texttt{fp32} output is bitwise $0$ up to the
+frequencies of interest; on a trained network the \texttt{fp32} numerical error is
+$1.2\times10^{-7}$, six orders of magnitude below the residual the network actually reaches
+($3.4\times10^{-2}$). \texttt{fp32} is adequate; residual faithfulness is limited by the
+network's approximation capacity, not by floating-point precision. (Consequently the method
+requires no \texttt{fp64} hardware.)
+
+\section{Epistemic status}
+Across this audit it is useful to distinguish two kinds of statement. \emph{Existence and
+ceiling} claims---that the spectral loss is Whittle-efficient for the second-order
+structure and provably blind beyond it, that a finite full-law certificate exists for
+$\alpha$-stable drivers in $\zeta_s$---are robust: they survive direct verification and
+adversarial variation of the method. \emph{Scope and scaling} conditions---the mesh regime
+for $\varepsilon_{\mathrm{num}}$, the density assumption for a VaR transfer, the $L^s$
+residual exponent, the separability regime---are here made explicit and measured rather than
+assumed. We accordingly state the ceiling results with confidence and the scope conditions
+with the assumptions under which they hold.
+
+\section{Reproducibility}
+Scripts (NumPy/PyTorch, \texttt{float64} for the linear algebra): the linear/spatial/
+nonlinear $\varepsilon_{\mathrm{num}}$ verification
+(\texttt{fd\_convergence\_stable\{,\_spatial,\_nonlinear\}.py}); the separability index and
+cost ablation (\texttt{separability\_index.py}, \texttt{ablation\_separability.py}); the
+Zolotarev bound tightness, $L^s$ gradient variance, and $\zeta_s\!\to\!$VaR counterexample
+(\texttt{zolotarev\_\{bound\_tightness,grad\_variance,var\_transfer\}.py}); and the
+\texttt{fp32} residual floor (\texttt{fp32\_residual\_floor.py}).
+
+\end{document}
